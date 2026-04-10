@@ -1,8 +1,10 @@
 # Claude Usage Widget
 
-A lightweight macOS desktop widget that shows your Claude.ai usage limits in real time. Always-on-top, draggable, and lives in your menu bar.
+A lightweight desktop widget that shows your Claude.ai usage limits in real time. Always-on-top, draggable, with a built-in setup wizard.
 
-![macOS](https://img.shields.io/badge/macOS-only-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+Available for **macOS** and **Windows**.
+
+![macOS](https://img.shields.io/badge/macOS-supported-blue) ![Windows](https://img.shields.io/badge/Windows-supported-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## What it shows
 
@@ -11,17 +13,20 @@ A lightweight macOS desktop widget that shows your Claude.ai usage limits in rea
 - **Per-model breakdown** — Opus and Sonnet usage (when available)
 - **Extra credits** — overuse billing status and spend
 
-Bars change colour as you approach limits: purple → yellow → red.
+Bars change colour as you approach limits: purple -> yellow -> red.
 
 ## How it works
 
 1. A Python backend reads your Chrome session cookies directly from disk — **no browser tab needed**, no API keys, no tokens to copy
 2. It polls the usage endpoint every 60 seconds and serves the data on `localhost:9113`
-3. A native Swift widget reads from that local API and renders a floating overlay
+3. A native widget reads from that local API and renders a floating always-on-top overlay
+4. On first launch, a **setup wizard** guides you through any missing steps
 
-If direct cookie extraction isn't available, it falls back to an AppleScript bridge that uses an open `claude.ai` Chrome tab.
+---
 
-## Requirements
+## macOS
+
+### Requirements
 
 - macOS (tested on Sonoma / Sequoia)
 - Google Chrome — logged into `claude.ai` (doesn't need to be open/running)
@@ -29,33 +34,84 @@ If direct cookie extraction isn't available, it falls back to an AppleScript bri
 - Python 3 (included with macOS)
 - A Claude Pro or Max subscription
 
-## Quick start
+### Quick start
 
 ```bash
 git clone https://github.com/siperdudeuk/claude-usage-widget.git
-cd claude-usage-widget
+cd claude-usage-widget/macos
 ./start.sh
 ```
 
-This builds the Swift widget (first run only) and starts both the backend and the overlay.
+This installs dependencies, builds the Swift widget (first run only), and starts everything.
 
-## Install as an app
+### Install as an app
 
 ```bash
+cd macos
 ./install.sh
 ```
 
-This creates `Claude Usage Widget.app` in `~/Applications` so you can launch it from Spotlight or set it to open at login.
+Creates `Claude Usage Widget.app` in `~/Applications` — launch from Spotlight or set to open at login.
 
-## Stop
+### Stop
 
 ```bash
+cd macos
 ./stop.sh
 ```
 
+### Menu bar
+
+Look for the ⚡ icon in your menu bar:
+- **Show/Hide** — toggle the widget overlay
+- **Pin on Top** — keep the widget above all windows
+- **Quit** — stop the widget and backend
+
+### Permissions
+
+On first run, macOS may ask you to grant Chrome automation permissions (only used as a fallback). Go to **System Settings > Privacy & Security > Automation** and allow the terminal/app to control Chrome.
+
+---
+
+## Windows
+
+### Requirements
+
+- Windows 10 or 11
+- Google Chrome — logged into `claude.ai`
+- Python 3.8+ (install from [python.org](https://python.org), check "Add to PATH")
+- A Claude Pro or Max subscription
+
+### Quick start
+
+```cmd
+git clone https://github.com/siperdudeuk/claude-usage-widget.git
+cd claude-usage-widget\windows
+start.bat
+```
+
+This installs dependencies and launches the widget.
+
+### Install
+
+```cmd
+cd windows
+install.bat
+```
+
+Creates a Start Menu shortcut so you can search "Claude Usage Widget" to launch it.
+
+### Stop
+
+```cmd
+stop.bat
+```
+
+---
+
 ## Configuration
 
-All settings are via environment variables (set them before running `start.sh`):
+All settings are via environment variables (set before launching):
 
 | Variable | Default | Description |
 |---|---|---|
@@ -63,18 +119,7 @@ All settings are via environment variables (set them before running `start.sh`):
 | `CLAUDE_POLL_INTERVAL` | `60` | Seconds between usage polls |
 | `CLAUDE_WIDGET_PORT` | `9113` | Local API port |
 
-If `CLAUDE_ORG_ID` is not set, the backend will auto-detect it from your Chrome session on first launch.
-
-## Menu bar
-
-Look for the ⚡ icon in your menu bar:
-- **Show/Hide** — toggle the widget overlay
-- **Pin on Top** — keep the widget above all windows
-- **Quit** — stop the widget and backend
-
-## Permissions
-
-On first run, macOS will ask you to grant Chrome automation permissions. Go to **System Settings → Privacy & Security → Automation** and allow the terminal/app to control Chrome.
+If `CLAUDE_ORG_ID` is not set, the backend auto-detects it from your Chrome session on first launch.
 
 ## License
 
