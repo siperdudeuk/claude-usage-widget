@@ -15,14 +15,16 @@ Bars change colour as you approach limits: purple → yellow → red.
 
 ## How it works
 
-1. A Python backend uses AppleScript to piggyback on an existing `claude.ai` tab in Chrome — no API keys or tokens needed
+1. A Python backend reads your Chrome session cookies directly from disk — **no browser tab needed**, no API keys, no tokens to copy
 2. It polls the usage endpoint every 60 seconds and serves the data on `localhost:9113`
 3. A native Swift widget reads from that local API and renders a floating overlay
+
+If direct cookie extraction isn't available, it falls back to an AppleScript bridge that uses an open `claude.ai` Chrome tab.
 
 ## Requirements
 
 - macOS (tested on Sonoma / Sequoia)
-- Google Chrome with a `claude.ai` tab open and logged in
+- Google Chrome — logged into `claude.ai` (doesn't need to be open/running)
 - Xcode Command Line Tools (`xcode-select --install`)
 - Python 3 (included with macOS)
 - A Claude Pro or Max subscription

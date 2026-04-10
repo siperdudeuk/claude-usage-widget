@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
 Claude Usage Monitor — Backend
-Polls claude.ai usage via Chrome AppleScript bridge.
-Serves usage data via local HTTP on port 9113.
+Fetches claude.ai usage data and serves it via local HTTP on port 9113.
+
+Auth methods (tried in order):
+  1. Direct cookie extraction from Chrome's cookie store (no browser tab needed)
+  2. AppleScript bridge via an open claude.ai Chrome tab (fallback)
 """
 
 import subprocess
@@ -11,6 +14,12 @@ import threading
 import time
 import os
 import sys
+import sqlite3
+import shutil
+import tempfile
+import hashlib
+import urllib.request
+import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
@@ -21,10 +30,135 @@ PORT = int(os.environ.get("CLAUDE_WIDGET_PORT", "9113"))
 usage_data = {"error": "Starting up...", "timestamp": None}
 usage_lock = threading.Lock()
 
+# Which fetch method is currently working
+_fetch_method = None  # "cookies" or "applescript"
+_session_cookie = None
+_cookie_last_refreshed = 0
+COOKIE_REFRESH_INTERVAL = 300  # re-read cookies every 5 minutes
 
-def fetch_via_chrome(url):
-    """Use AppleScript to run fetch() inside an existing claude.ai tab.
-    Writes result to document.title and reads it back."""
+
+# ---------------------------------------------------------------------------
+# Method 1: Direct cookie extraction from Chrome's cookie store
+# ---------------------------------------------------------------------------
+
+def _get_chrome_encryption_key():
+    """Get Chrome's cookie encryption key from the macOS Keychain."""
+    result = subprocess.run(
+        ["security", "find-generic-password", "-w", "-s", "Chrome Safe Storage"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise Exception("Could not read Chrome Safe Storage key from Keychain")
+    return result.stdout.strip()
+
+
+def _decrypt_chrome_cookie(encrypted_value, key):
+    """Decrypt a Chrome cookie value on macOS."""
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from cryptography.hazmat.primitives import padding
+        from cryptography.hazmat.backends import default_backend
+    except ImportError:
+        raise Exception("cryptography package not installed — run: pip3 install cryptography")
+
+    if encrypted_value[:3] == b"v10":
+        encrypted_value = encrypted_value[3:]
+    else:
+        # Not encrypted or unknown format
+        return encrypted_value.decode("utf-8", errors="replace")
+
+    derived_key = hashlib.pbkdf2_hmac("sha1", key.encode("utf-8"), b"saltysalt", 1003, dklen=16)
+    iv = b" " * 16
+    cipher = Cipher(algorithms.AES(derived_key), modes.CBC(iv), backend=default_backend())
+    decryptor = cipher.decryptor()
+    decrypted = decryptor.update(encrypted_value) + decryptor.finalize()
+
+    # Remove PKCS7 padding
+    unpadder = padding.PKCS7(128).unpadder()
+    decrypted = unpadder.update(decrypted) + unpadder.finalize()
+    return decrypted.decode("utf-8")
+
+
+def get_chrome_cookies():
+    """Extract claude.ai session cookies directly from Chrome's cookie store."""
+    cookie_paths = [
+        os.path.expanduser("~/Library/Application Support/Google/Chrome/Default/Cookies"),
+        os.path.expanduser("~/Library/Application Support/Google/Chrome/Profile 1/Cookies"),
+    ]
+
+    cookie_db = None
+    for p in cookie_paths:
+        if os.path.exists(p):
+            cookie_db = p
+            break
+
+    if not cookie_db:
+        raise Exception("Chrome cookie database not found")
+
+    key = _get_chrome_encryption_key()
+
+    # Copy the DB to a temp file (Chrome may have it locked)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    tmp.close()
+    shutil.copy2(cookie_db, tmp.name)
+
+    try:
+        conn = sqlite3.connect(tmp.name)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT name, encrypted_value FROM cookies WHERE host_key LIKE '%claude.ai%'"
+        )
+        cookies = {}
+        for name, encrypted_value in cursor.fetchall():
+            try:
+                cookies[name] = _decrypt_chrome_cookie(encrypted_value, key)
+            except Exception:
+                continue
+        conn.close()
+    finally:
+        os.unlink(tmp.name)
+
+    if not cookies:
+        raise Exception("No claude.ai cookies found in Chrome — are you logged in?")
+
+    return cookies
+
+
+def fetch_via_cookies(url):
+    """Make an authenticated request to claude.ai using extracted cookies."""
+    global _session_cookie, _cookie_last_refreshed
+
+    now = time.time()
+    if _session_cookie is None or (now - _cookie_last_refreshed) > COOKIE_REFRESH_INTERVAL:
+        cookies = get_chrome_cookies()
+        cookie_parts = [f"{k}={v}" for k, v in cookies.items()]
+        _session_cookie = "; ".join(cookie_parts)
+        _cookie_last_refreshed = now
+
+    req = urllib.request.Request(url, headers={
+        "Cookie": _session_cookie,
+        "User-Agent": "Claude-Usage-Widget/1.0",
+        "Accept": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return resp.read().decode("utf-8")
+
+
+def detect_org_id_via_cookies():
+    """Detect org ID using cookie-based auth."""
+    raw = fetch_via_cookies("https://claude.ai/api/organizations")
+    orgs = json.loads(raw)
+    if orgs and len(orgs) > 0:
+        return orgs[0].get("uuid") or orgs[0].get("id")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Method 2: AppleScript Chrome tab bridge (fallback)
+# ---------------------------------------------------------------------------
+
+def fetch_via_chrome_tab(url):
+    """Use AppleScript to run fetch() inside an existing claude.ai tab."""
     script = '''
     tell application "Google Chrome"
         set foundTab to null
@@ -73,52 +207,70 @@ def fetch_via_chrome(url):
     return output
 
 
+def detect_org_id_via_applescript():
+    """Detect org ID using AppleScript Chrome tab."""
+    raw = fetch_via_chrome_tab("https://claude.ai/api/organizations")
+    orgs = json.loads(raw)
+    if orgs and len(orgs) > 0:
+        return orgs[0].get("uuid") or orgs[0].get("id")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Unified fetch with automatic method selection
+# ---------------------------------------------------------------------------
+
+def fetch_url(url):
+    """Fetch a URL from claude.ai, trying cookies first, then AppleScript."""
+    global _fetch_method
+
+    if _fetch_method == "cookies":
+        return fetch_via_cookies(url)
+    elif _fetch_method == "applescript":
+        return fetch_via_chrome_tab(url)
+
+    # Auto-detect: try cookies first
+    try:
+        result = fetch_via_cookies(url)
+        _fetch_method = "cookies"
+        print("  Using direct cookie extraction (no browser tab needed)")
+        return result
+    except Exception as e:
+        print(f"  Cookie method unavailable: {e}")
+
+    # Fall back to AppleScript
+    try:
+        result = fetch_via_chrome_tab(url)
+        _fetch_method = "applescript"
+        print("  Using AppleScript Chrome tab bridge (fallback)")
+        return result
+    except Exception as e2:
+        raise Exception(f"All fetch methods failed. Cookies: {e} | AppleScript: {e2}")
+
+
 def detect_org_id():
-    """Try to detect the org ID from an existing claude.ai tab."""
-    script = '''
-    tell application "Google Chrome"
-        set foundTab to null
-        repeat with w in windows
-            repeat with t in tabs of w
-                if URL of t starts with "https://claude.ai" then
-                    set foundTab to t
-                    exit repeat
-                end if
-            end repeat
-            if foundTab is not null then exit repeat
-        end repeat
-        if foundTab is null then
-            return "ERROR:No claude.ai tab open in Chrome"
-        end if
+    """Detect org ID, trying cookies first, then AppleScript."""
+    try:
+        org = detect_org_id_via_cookies()
+        if org:
+            return org
+    except Exception:
+        pass
 
-        tell foundTab to reload
-        delay 4
+    try:
+        org = detect_org_id_via_applescript()
+        if org:
+            return org
+    except Exception:
+        pass
 
-        set origTitle to name of foundTab
-        set jsCode to "fetch('/api/organizations', {credentials:'include'}).then(r=>r.text()).then(t=>{document.title='FETCHOK:'+t.substring(0,8000)}).catch(e=>{document.title='FETCHERR:'+e.message})"
-        execute foundTab javascript jsCode
-        delay 4
-        set resultTitle to name of foundTab
-        execute foundTab javascript "document.title='" & origTitle & "'"
-        return resultTitle
-    end tell
-    '''
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True, text=True, timeout=30,
-    )
-    output = result.stdout.strip()
-    if output.startswith("FETCHOK:"):
-        orgs = json.loads(output[8:])
-        if orgs and len(orgs) > 0:
-            return orgs[0].get("uuid") or orgs[0].get("id")
     return None
 
 
 def collect_usage():
     """Fetch usage data from claude.ai."""
     url = f"https://claude.ai/api/organizations/{ORG_ID}/usage"
-    raw = fetch_via_chrome(url)
+    raw = fetch_url(url)
     data = json.loads(raw)
     data["timestamp"] = datetime.utcnow().isoformat() + "Z"
     data["error"] = None
@@ -126,7 +278,7 @@ def collect_usage():
 
 
 def polling_loop():
-    global usage_data
+    global usage_data, _fetch_method, _session_cookie
     while True:
         try:
             data = collect_usage()
@@ -136,6 +288,11 @@ def polling_loop():
             with usage_lock:
                 usage_data["error"] = str(e)
                 usage_data["timestamp"] = datetime.utcnow().isoformat() + "Z"
+            # If cookies failed mid-run, reset so next poll retries detection
+            if _fetch_method == "cookies" and "HTTP Error 401" in str(e):
+                print("  Cookie auth expired, will re-extract next poll...")
+                _session_cookie = None
+                _cookie_last_refreshed = 0
         time.sleep(POLL_INTERVAL)
 
 
@@ -159,18 +316,23 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     global ORG_ID
 
+    print("Claude Usage Monitor starting...")
+    print()
+
     if not ORG_ID:
-        print("No CLAUDE_ORG_ID set. Attempting auto-detection from Chrome...")
+        print("No CLAUDE_ORG_ID set. Attempting auto-detection...")
         detected = detect_org_id()
         if detected:
             ORG_ID = detected
             print(f"  Detected org: {ORG_ID}")
         else:
             print("ERROR: Could not detect org ID.")
-            print("Set CLAUDE_ORG_ID environment variable or ensure claude.ai is open in Chrome.")
+            print("Options:")
+            print("  1. Set CLAUDE_ORG_ID environment variable")
+            print("  2. Make sure you're logged into claude.ai in Chrome")
+            print("  3. Install 'cryptography' package: pip3 install cryptography")
             sys.exit(1)
 
-    print(f"Claude Usage Monitor starting...")
     print(f"  Org:  {ORG_ID}")
     print(f"  Poll: {POLL_INTERVAL}s")
     print(f"  API:  http://localhost:{PORT}/api/usage")

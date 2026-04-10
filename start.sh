@@ -5,6 +5,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Install Python dependencies if needed
+if ! python3 -c "import cryptography" 2>/dev/null; then
+    echo "Installing dependencies..."
+    pip3 install -q -r requirements.txt
+fi
+
 # Build if needed
 if [ ! -f ClaudeWidget ]; then
     echo "First run — building widget..."
