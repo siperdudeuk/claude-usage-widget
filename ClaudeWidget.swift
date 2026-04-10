@@ -167,6 +167,13 @@ func usageHTML(port: String) -> String {
       .extra-label { color: var(--muted); }
       .error-box { background: rgba(248,81,73,0.1); border: 1px solid rgba(248,81,73,0.4);
         border-radius: 8px; padding: 10px; color: var(--red); font-size: 11px; }
+      .setup-box { background: rgba(88,166,255,0.08); border: 1px solid rgba(88,166,255,0.3);
+        border-radius: 8px; padding: 12px; font-size: 11px; }
+      .setup-box h3 { font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--blue); }
+      .setup-step { display: flex; gap: 8px; padding: 4px 0; color: var(--muted); }
+      .setup-step .num { color: var(--purple); font-weight: 700; min-width: 16px; }
+      .setup-step.done { color: var(--green); }
+      .setup-step.issue { color: var(--yellow); }
     </style>
     </head>
     <body>
@@ -238,13 +245,57 @@ func usageHTML(port: String) -> String {
         '<div class="reset-time">' + resetStr + '</div></div>';
     }
 
+    function renderSetup(status, error) {
+      const hasCrypto = status && status.has_cryptography;
+      const hasCookies = status && status.has_chrome_cookies;
+      const hasOrg = status && status.org_id;
+      const method = status && status.method;
+
+      let steps = '';
+
+      if (!hasCrypto) {
+        steps += '<div class="setup-step issue"><span class="num">1</span><span>Run: <b>pip3 install cryptography</b></span></div>';
+      } else {
+        steps += '<div class="setup-step done"><span class="num">✓</span><span>cryptography package installed</span></div>';
+      }
+
+      if (!hasCookies) {
+        steps += '<div class="setup-step issue"><span class="num">2</span><span>Log into <b>claude.ai</b> in Chrome</span></div>';
+      } else {
+        steps += '<div class="setup-step done"><span class="num">✓</span><span>Chrome cookies found</span></div>';
+      }
+
+      if (!hasOrg) {
+        steps += '<div class="setup-step issue"><span class="num">3</span><span>Waiting to detect your organisation...</span></div>';
+      } else {
+        steps += '<div class="setup-step done"><span class="num">✓</span><span>Organisation detected</span></div>';
+      }
+
+      if (method) {
+        steps += '<div class="setup-step done"><span class="num">✓</span><span>Connected via ' + method + '</span></div>';
+      }
+
+      if (error && error !== 'Starting up...') {
+        steps += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);color:var(--red);font-size:10px;">' + error + '</div>';
+      }
+
+      return '<div class="setup-box"><h3>Setup</h3>' + steps + '</div>';
+    }
+
     async function refresh() {
       try {
         const r = await fetch('http://localhost:' + API_PORT + '/api/usage');
         const d = await r.json();
+
         if (d.error) {
-          document.getElementById('content').innerHTML = '<div class="error-box">' + d.error + '</div>';
-          document.getElementById('meta').textContent = 'Error';
+          // Fetch status to show setup guidance
+          let status = null;
+          try {
+            const sr = await fetch('http://localhost:' + API_PORT + '/api/status');
+            status = await sr.json();
+          } catch(e2) {}
+          document.getElementById('content').innerHTML = renderSetup(status, d.error);
+          document.getElementById('meta').textContent = d.error === 'Starting up...' ? 'Starting...' : 'Setup needed';
           return;
         }
 
@@ -286,7 +337,10 @@ func usageHTML(port: String) -> String {
         document.getElementById('content').innerHTML = html;
       } catch(e) {
         document.getElementById('content').innerHTML =
-          '<div class="error-box">Backend offline — run claude-usage.py</div>';
+          '<div class="setup-box"><h3>Starting up...</h3>' +
+          '<div class="setup-step"><span class="num">...</span><span>Waiting for backend to start</span></div>' +
+          '<div style="margin-top:8px;font-size:10px;color:var(--muted);">If this persists, run <b>./start.sh</b></div></div>';
+        document.getElementById('meta').textContent = 'Connecting...';
       }
     }
 

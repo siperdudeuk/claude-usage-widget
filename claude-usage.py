@@ -305,12 +305,40 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             with usage_lock:
                 self.wfile.write(json.dumps(usage_data).encode())
+        elif self.path == "/api/status":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            status = {
+                "method": _fetch_method,
+                "org_id": ORG_ID or None,
+                "has_cryptography": _has_cryptography(),
+                "has_chrome_cookies": _has_chrome_cookies(),
+            }
+            self.wfile.write(json.dumps(status).encode())
         else:
             self.send_response(404)
             self.end_headers()
 
     def log_message(self, format, *args):
         pass
+
+
+def _has_cryptography():
+    try:
+        import cryptography
+        return True
+    except ImportError:
+        return False
+
+
+def _has_chrome_cookies():
+    paths = [
+        os.path.expanduser("~/Library/Application Support/Google/Chrome/Default/Cookies"),
+        os.path.expanduser("~/Library/Application Support/Google/Chrome/Profile 1/Cookies"),
+    ]
+    return any(os.path.exists(p) for p in paths)
 
 
 def main():
