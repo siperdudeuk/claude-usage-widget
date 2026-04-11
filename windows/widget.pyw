@@ -74,6 +74,22 @@ WIDGET_HTML = """
   .setup-step .num { color: var(--purple); font-weight: 700; min-width: 16px; }
   .setup-step.done { color: var(--green); }
   .setup-step.issue { color: var(--yellow); }
+  .update-banner {
+    background: linear-gradient(90deg, rgba(188,140,255,0.2), rgba(88,166,255,0.2));
+    border: 1px solid rgba(188,140,255,0.5);
+    border-radius: 8px; padding: 8px 10px; margin: 0 14px 10px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; font-size: 10px;
+  }
+  .update-banner .msg { color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .update-banner .msg b { color: var(--purple); }
+  .update-btn {
+    background: var(--purple); color: #1a1a2e; border: none;
+    padding: 4px 10px; border-radius: 5px; font-size: 10px;
+    font-weight: 700; cursor: pointer; white-space: nowrap;
+  }
+  .update-btn:hover { background: #d4a0ff; }
+  .update-btn:disabled { opacity: 0.5; cursor: wait; }
 </style>
 </head>
 <body>
@@ -86,6 +102,7 @@ WIDGET_HTML = """
   </div>
 </div>
 <div class="meta" id="meta">Loading...</div>
+<div id="updateBanner" style="display:none"></div>
 <div class="content" id="content">
   <div class="setup-box"><h3>Starting up...</h3>
   <div class="setup-step"><span class="num">...</span><span>Waiting for backend</span></div></div>
@@ -222,8 +239,45 @@ async function refresh() {
   }
 }
 
+async function checkVersion() {
+  try {
+    const r = await fetch('http://localhost:' + API_PORT + '/api/version');
+    const v = await r.json();
+    const banner = document.getElementById('updateBanner');
+    if (v.update_available) {
+      const msg = v.latest_message || 'A new version is available';
+      banner.className = 'update-banner';
+      banner.style.display = 'flex';
+      banner.innerHTML =
+        '<span class="msg"><b>Update:</b> ' + msg + '</span>' +
+        '<button class="update-btn" id="updateBtn" onclick="doUpdate()">Update</button>';
+    } else {
+      banner.style.display = 'none';
+    }
+  } catch(e) {}
+}
+
+async function doUpdate() {
+  const btn = document.getElementById('updateBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Updating...'; }
+  try {
+    const r = await fetch('http://localhost:' + API_PORT + '/api/update', { method: 'POST' });
+    const result = await r.json();
+    if (result.success) {
+      if (btn) btn.textContent = 'Done!';
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+      alert('Update failed: ' + (result.error || 'unknown error'));
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+  }
+}
+
 refresh();
 setInterval(refresh, 10000);
+checkVersion();
+setInterval(checkVersion, 300000);
 </script>
 </body>
 </html>

@@ -13,6 +13,7 @@ import os
 import sys
 import sqlite3
 import shutil
+import subprocess
 import tempfile
 import base64
 import urllib.request
@@ -23,9 +24,22 @@ from datetime import datetime
 ORG_ID = os.environ.get("CLAUDE_ORG_ID", "")
 POLL_INTERVAL = int(os.environ.get("CLAUDE_POLL_INTERVAL", "60"))
 PORT = int(os.environ.get("CLAUDE_WIDGET_PORT", "9113"))
+UPDATE_CHECK_INTERVAL = 3600  # once per hour
+GITHUB_REPO = "siperdudeuk/claude-usage-widget"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_DIR = os.path.dirname(SCRIPT_DIR)
 
 usage_data = {"error": "Starting up...", "timestamp": None}
 usage_lock = threading.Lock()
+
+version_info = {
+    "current": None,
+    "latest": None,
+    "update_available": False,
+    "latest_message": None,
+    "checked_at": None,
+}
+version_lock = threading.Lock()
 
 _fetch_method = None
 _session_cookie = None
@@ -204,6 +218,86 @@ def collect_usage():
     return data
 
 
+# ---------------------------------------------------------------------------
+# Version / update check
+# ---------------------------------------------------------------------------
+
+def _get_current_commit():
+    try:
+        result = subprocess.run(
+            ["git", "-C", REPO_DIR, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _get_latest_commit_from_github():
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/commits/main"
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Claude-Usage-Widget/1.0",
+        "Accept": "application/vnd.github+json",
+    })
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    return {
+        "sha": data.get("sha"),
+        "message": (data.get("commit", {}).get("message") or "").split("\n")[0],
+    }
+
+
+def check_for_updates():
+    global version_info
+    current = _get_current_commit()
+    try:
+        latest = _get_latest_commit_from_github()
+    except Exception:
+        with version_lock:
+            version_info["checked_at"] = datetime.utcnow().isoformat() + "Z"
+        return
+
+    with version_lock:
+        version_info["current"] = current
+        version_info["latest"] = latest["sha"]
+        version_info["latest_message"] = latest["message"]
+        version_info["update_available"] = (
+            current is not None
+            and latest["sha"] is not None
+            and current != latest["sha"]
+        )
+        version_info["checked_at"] = datetime.utcnow().isoformat() + "Z"
+
+
+def update_check_loop():
+    while True:
+        try:
+            check_for_updates()
+        except Exception:
+            pass
+        time.sleep(UPDATE_CHECK_INTERVAL)
+
+
+def run_update():
+    update_script = os.path.join(SCRIPT_DIR, "update.bat")
+    if not os.path.exists(update_script):
+        return {"success": False, "error": "update.bat not found"}
+    try:
+        result = subprocess.run(
+            [update_script],
+            capture_output=True, text=True, timeout=120, cwd=SCRIPT_DIR, shell=True,
+        )
+        return {
+            "success": result.returncode == 0,
+            "output": result.stdout,
+            "error": result.stderr if result.returncode != 0 else None,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def polling_loop():
     global usage_data, _session_cookie, _cookie_last_refreshed
     while True:
@@ -243,6 +337,25 @@ class Handler(BaseHTTPRequestHandler):
                 "has_chrome_cookies": _has_chrome_cookies(),
             }
             self.wfile.write(json.dumps(status).encode())
+        elif self.path == "/api/version":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            with version_lock:
+                self.wfile.write(json.dumps(version_info).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        if self.path == "/api/update":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result = run_update()
+            self.wfile.write(json.dumps(result).encode())
         else:
             self.send_response(404)
             self.end_headers()
@@ -303,6 +416,9 @@ def main():
 
     t = threading.Thread(target=polling_loop, daemon=True)
     t.start()
+
+    v = threading.Thread(target=update_check_loop, daemon=True)
+    v.start()
 
     server = HTTPServer(("127.0.0.1", PORT), Handler)
     try:
