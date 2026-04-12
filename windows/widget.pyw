@@ -109,12 +109,20 @@ WIDGET_HTML = """
     font-size: 14px; padding: 0 2px; line-height: 1;
   }
   .coffee-dismiss:hover { color: var(--text); }
+  .share-toast {
+    position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+    background: var(--purple); color: #1a1a2e; padding: 6px 14px;
+    border-radius: 6px; font-size: 10px; font-weight: 700;
+    opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 99;
+  }
+  .share-toast.show { opacity: 1; }
 </style>
 </head>
 <body>
 <div class="titlebar" id="titlebar">
   <h1>⚡ Claude <span class="accent">Usage</span></h1>
   <div class="controls">
+    <button class="ctrl-btn" title="Share with friends" onclick="shareWidget()">📤</button>
     <button class="ctrl-btn coffee" title="Buy me a coffee" onclick="openCoffee()">☕</button>
     <button class="ctrl-btn" title="Minimize" onclick="pywebview.api.minimize()">—</button>
     <button class="ctrl-btn" title="Close" onclick="pywebview.api.quit()">✕</button>
@@ -127,12 +135,23 @@ WIDGET_HTML = """
   <div class="setup-box"><h3>Starting up...</h3>
   <div class="setup-step"><span class="num">...</span><span>Waiting for backend</span></div></div>
 </div>
+<div class="share-toast" id="shareToast">Link copied to clipboard!</div>
 
 <script>
 const API_PORT = '""" + PORT + """';
 
 function openCoffee() {
   pywebview.api.open_url('https://buymeacoffee.com/nathanbb');
+}
+
+function shareWidget() {
+  pywebview.api.share();
+  showShareToast();
+}
+function showShareToast() {
+  const t = document.getElementById('shareToast');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
 }
 
 function barClass(pct) {
@@ -344,6 +363,14 @@ class Api:
         import webbrowser
         webbrowser.open(url)
 
+    def share(self):
+        text = "Check out Claude Usage Widget \u2014 monitor your Claude AI usage limits in a floating desktop widget!\nhttps://github.com/siperdudeuk/claude-usage-widget"
+        try:
+            process = subprocess.Popen(["clip"], stdin=subprocess.PIPE)
+            process.communicate(text.encode("utf-16le"))
+        except Exception:
+            pass
+
 
 def start_backend():
     """Start the backend process."""
@@ -377,7 +404,7 @@ def main():
         transparent=True,
     )
     api = Api(window)
-    window.expose(api.minimize, api.quit, api.open_url)
+    window.expose(api.minimize, api.quit, api.open_url, api.share)
 
     def on_closed():
         backend.terminate()

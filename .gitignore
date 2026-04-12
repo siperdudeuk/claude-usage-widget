@@ -5,3 +5,4 @@ ClaudeWidget
 __pycache__/
 *.pyc
 *.pyo
+.widget-id

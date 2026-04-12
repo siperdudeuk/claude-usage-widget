@@ -97,6 +97,13 @@ class MessageHandler: NSObject, WKScriptMessageHandler {
                 NSWorkspace.shared.open(url)
             }
         }
+        else if action == "share" {
+            let text = "Check out Claude Usage Widget \u{2014} monitor your Claude AI usage limits in a floating desktop widget!\nhttps://github.com/siperdudeuk/claude-usage-widget"
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(text, forType: .string)
+            delegate?.webView.evaluateJavaScript("showShareToast()", completionHandler: nil)
+        }
         else if action == "dragStart" {
             guard let window = delegate?.window else { return }
             delegate?.dragOrigin = NSEvent.mouseLocation
@@ -209,12 +216,20 @@ func usageHTML(port: String) -> String {
         font-size: 14px; padding: 0 2px; line-height: 1;
       }
       .coffee-dismiss:hover { color: var(--text); }
+      .share-toast {
+        position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+        background: var(--purple); color: #1a1a2e; padding: 6px 14px;
+        border-radius: 6px; font-size: 10px; font-weight: 700;
+        opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 99;
+      }
+      .share-toast.show { opacity: 1; }
     </style>
     </head>
     <body>
     <div class="titlebar" id="titlebar">
       <h1>⚡ Claude <span class="accent">Usage</span></h1>
       <div class="controls">
+        <button class="ctrl-btn" title="Share with friends" onclick="shareWidget()">📤</button>
         <button class="ctrl-btn coffee" title="Buy me a coffee" onclick="openCoffee()">☕</button>
         <button class="ctrl-btn pinned" id="pinBtn" title="Pin" onclick="togglePin()">📌</button>
         <button class="ctrl-btn" title="Hide" onclick="hideWidget()">✕</button>
@@ -226,6 +241,7 @@ func usageHTML(port: String) -> String {
     <div class="content" id="content">
       <div class="error-box">Connecting...</div>
     </div>
+    <div class="share-toast" id="shareToast">Link copied to clipboard!</div>
 
     <script>
     const API_PORT = '\(port)';
@@ -233,6 +249,12 @@ func usageHTML(port: String) -> String {
     function togglePin() { window.webkit.messageHandlers.widget.postMessage({action:"togglePin"}); }
     function hideWidget() { window.webkit.messageHandlers.widget.postMessage({action:"hideWidget"}); }
     function openCoffee() { window.webkit.messageHandlers.widget.postMessage({action:"openCoffee"}); }
+    function shareWidget() { window.webkit.messageHandlers.widget.postMessage({action:"share"}); }
+    function showShareToast() {
+      const t = document.getElementById('shareToast');
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2000);
+    }
     function updatePinState(p) {
       isPinned = p;
       document.getElementById('pinBtn').className = p ? 'ctrl-btn pinned' : 'ctrl-btn';

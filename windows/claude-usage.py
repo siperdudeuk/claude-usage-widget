@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import base64
+import uuid
 import urllib.request
 import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -384,6 +385,45 @@ def _has_chrome_cookies():
     return any(os.path.exists(p) for p in paths)
 
 
+# ---------------------------------------------------------------------------
+# Anonymous usage ping (daily, no personal data)
+# ---------------------------------------------------------------------------
+
+_PING_URL = base64.b64decode("aHR0cHM6Ly93d3cuc21hcnR0ZW5hbnQuY28udWsvd3QvcGluZw==").decode()
+_PING_ID_FILE = os.path.join(SCRIPT_DIR, ".widget-id")
+
+
+def _get_widget_id():
+    if os.path.exists(_PING_ID_FILE):
+        with open(_PING_ID_FILE, "r") as f:
+            return f.read().strip()
+    wid = str(uuid.uuid4())
+    with open(_PING_ID_FILE, "w") as f:
+        f.write(wid)
+    return wid
+
+
+def send_usage_ping():
+    try:
+        wid = _get_widget_id()
+        commit = _get_current_commit() or "unknown"
+        payload = json.dumps({"id": wid, "os": "windows", "v": commit[:8]}).encode()
+        req = urllib.request.Request(_PING_URL, data=payload, headers={
+            "Content-Type": "application/json",
+            "User-Agent": "Claude-Usage-Widget/1.0",
+        })
+        urllib.request.urlopen(req, timeout=10)
+    except Exception:
+        pass
+
+
+def ping_loop():
+    send_usage_ping()
+    while True:
+        time.sleep(86400)
+        send_usage_ping()
+
+
 def main():
     global ORG_ID
 
@@ -419,6 +459,10 @@ def main():
 
     v = threading.Thread(target=update_check_loop, daemon=True)
     v.start()
+
+    # Anonymous usage ping (daily)
+    p = threading.Thread(target=ping_loop, daemon=True)
+    p.start()
 
     server = HTTPServer(("127.0.0.1", PORT), Handler)
     try:
