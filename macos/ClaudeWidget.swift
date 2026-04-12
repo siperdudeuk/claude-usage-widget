@@ -190,6 +190,25 @@ func usageHTML(port: String) -> String {
       }
       .update-btn:hover { background: #d4a0ff; }
       .update-btn:disabled { opacity: 0.5; cursor: wait; }
+      .coffee-banner {
+        background: linear-gradient(90deg, rgba(255,221,0,0.08), rgba(255,180,0,0.08));
+        border: 1px solid rgba(255,221,0,0.25);
+        border-radius: 8px; padding: 8px 10px; margin: 0 14px 10px;
+        display: flex; align-items: center; gap: 8px; font-size: 10px;
+      }
+      .coffee-banner .msg { color: var(--muted); flex: 1; }
+      .coffee-banner .msg b { color: #ffdd00; }
+      .coffee-link {
+        background: rgba(255,221,0,0.2); color: #ffdd00; border: none;
+        padding: 4px 10px; border-radius: 5px; font-size: 10px;
+        font-weight: 700; cursor: pointer; white-space: nowrap;
+      }
+      .coffee-link:hover { background: rgba(255,221,0,0.35); }
+      .coffee-dismiss {
+        background: none; border: none; color: var(--muted); cursor: pointer;
+        font-size: 14px; padding: 0 2px; line-height: 1;
+      }
+      .coffee-dismiss:hover { color: var(--text); }
     </style>
     </head>
     <body>
@@ -203,6 +222,7 @@ func usageHTML(port: String) -> String {
     </div>
     <div class="meta" id="meta">Loading...</div>
     <div id="updateBanner" style="display:none"></div>
+    <div id="coffeeBanner" class="coffee-banner" style="display:none"></div>
     <div class="content" id="content">
       <div class="error-box">Connecting...</div>
     </div>
@@ -397,10 +417,36 @@ func usageHTML(port: String) -> String {
       }
     }
 
+    function checkCoffeePrompt() {
+      const now = Date.now();
+      const firstSeen = localStorage.getItem('cw_first_seen');
+      if (!firstSeen) { localStorage.setItem('cw_first_seen', now.toString()); return; }
+      if ((now - parseInt(firstSeen)) < 3 * 86400000) return;
+      if (localStorage.getItem('cw_coffee_supported')) return;
+      const dismissed = localStorage.getItem('cw_coffee_dismissed');
+      if (dismissed && (now - parseInt(dismissed)) < 7 * 86400000) return;
+      const banner = document.getElementById('coffeeBanner');
+      banner.style.display = 'flex';
+      banner.innerHTML =
+        '<span class="msg">☕ <b>Enjoying the widget?</b> A coffee would be lovely!</span>' +
+        '<button class="coffee-link" onclick="supportCoffee()">Support</button>' +
+        '<button class="coffee-dismiss" onclick="dismissCoffee()">✕</button>';
+    }
+    function dismissCoffee() {
+      localStorage.setItem('cw_coffee_dismissed', Date.now().toString());
+      document.getElementById('coffeeBanner').style.display = 'none';
+    }
+    function supportCoffee() {
+      localStorage.setItem('cw_coffee_supported', '1');
+      document.getElementById('coffeeBanner').style.display = 'none';
+      openCoffee();
+    }
+
     refresh();
     setInterval(refresh, 10000);
     checkVersion();
-    setInterval(checkVersion, 300000); // every 5 minutes
+    setInterval(checkVersion, 300000);
+    checkCoffeePrompt();
     </script>
     </body>
     </html>
