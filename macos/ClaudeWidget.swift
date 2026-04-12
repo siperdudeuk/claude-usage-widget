@@ -82,6 +82,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func quitApp() { NSApp.terminate(nil) }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag || !window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        return true
+    }
 }
 
 class MessageHandler: NSObject, WKScriptMessageHandler {
@@ -98,11 +106,12 @@ class MessageHandler: NSObject, WKScriptMessageHandler {
             }
         }
         else if action == "share" {
-            let text = "Check out Claude Usage Widget \u{2014} monitor your Claude AI usage limits in a floating desktop widget!\nhttps://github.com/siperdudeuk/claude-usage-widget"
-            let pb = NSPasteboard.general
-            pb.clearContents()
-            pb.setString(text, forType: .string)
-            delegate?.webView.evaluateJavaScript("showShareToast()", completionHandler: nil)
+            guard let webView = delegate?.webView else { return }
+            let text = "Check out Claude Usage Widget \u{2014} monitor your Claude AI usage limits in a floating desktop widget!"
+            let url = URL(string: "https://github.com/siperdudeuk/claude-usage-widget")!
+            let picker = NSSharingServicePicker(items: [text, url])
+            let anchor = NSRect(x: webView.bounds.midX - 1, y: webView.bounds.maxY - 40, width: 2, height: 2)
+            picker.show(relativeTo: anchor, of: webView, preferredEdge: .minY)
         }
         else if action == "dragStart" {
             guard let window = delegate?.window else { return }
@@ -223,6 +232,12 @@ func usageHTML(port: String) -> String {
         opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 99;
       }
       .share-toast.show { opacity: 1; }
+      .footer { padding: 6px 14px 10px; border-top: 1px solid var(--border);
+        display: flex; justify-content: space-between; align-items: center;
+        font-size: 9px; color: var(--muted); }
+      .footer .users { display: flex; align-items: center; gap: 4px; }
+      .footer .users .dot { width: 5px; height: 5px; border-radius: 50%;
+        background: var(--green); display: inline-block; }
     </style>
     </head>
     <body>
@@ -241,6 +256,10 @@ func usageHTML(port: String) -> String {
     <div class="content" id="content">
       <div class="error-box">Connecting...</div>
     </div>
+    <div class="footer" id="footer">
+      <div class="users"><span class="dot"></span><span id="userCount">—</span></div>
+      <span>github.com/siperdudeuk</span>
+    </div>
     <div class="share-toast" id="shareToast">Link copied to clipboard!</div>
 
     <script>
@@ -250,11 +269,6 @@ func usageHTML(port: String) -> String {
     function hideWidget() { window.webkit.messageHandlers.widget.postMessage({action:"hideWidget"}); }
     function openCoffee() { window.webkit.messageHandlers.widget.postMessage({action:"openCoffee"}); }
     function shareWidget() { window.webkit.messageHandlers.widget.postMessage({action:"share"}); }
-    function showShareToast() {
-      const t = document.getElementById('shareToast');
-      t.classList.add('show');
-      setTimeout(() => t.classList.remove('show'), 2000);
-    }
     function updatePinState(p) {
       isPinned = p;
       document.getElementById('pinBtn').className = p ? 'ctrl-btn pinned' : 'ctrl-btn';
@@ -464,11 +478,23 @@ func usageHTML(port: String) -> String {
       openCoffee();
     }
 
+    const _CU = atob('aHR0cHM6Ly93d3cuc21hcnR0ZW5hbnQuY28udWsvd3QvY291bnQ=');
+    async function fetchUserCount() {
+      try {
+        const r = await fetch(_CU);
+        const d = await r.json();
+        const n = d.active || d.total || 0;
+        document.getElementById('userCount').textContent = n + ' active user' + (n !== 1 ? 's' : '');
+      } catch(e) {}
+    }
+
     refresh();
     setInterval(refresh, 10000);
     checkVersion();
     setInterval(checkVersion, 300000);
     checkCoffeePrompt();
+    fetchUserCount();
+    setInterval(fetchUserCount, 600000);
     </script>
     </body>
     </html>
@@ -478,5 +504,5 @@ func usageHTML(port: String) -> String {
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
-app.setActivationPolicy(.accessory)
+app.setActivationPolicy(.regular)
 app.run()

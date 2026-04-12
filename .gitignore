@@ -1,4 +1,7 @@
 ClaudeWidget
+ClaudeWidget.app/
+ClaudeWidget.icns
+ClaudeWidget.iconset/
 *.pid
 *.log
 .DS_Store

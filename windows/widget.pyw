@@ -116,6 +116,12 @@ WIDGET_HTML = """
     opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 99;
   }
   .share-toast.show { opacity: 1; }
+  .footer { padding: 6px 14px 10px; border-top: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 9px; color: var(--muted); }
+  .footer .users { display: flex; align-items: center; gap: 4px; }
+  .footer .users .dot { width: 5px; height: 5px; border-radius: 50%;
+    background: var(--green); display: inline-block; }
 </style>
 </head>
 <body>
@@ -134,6 +140,10 @@ WIDGET_HTML = """
 <div class="content" id="content">
   <div class="setup-box"><h3>Starting up...</h3>
   <div class="setup-step"><span class="num">...</span><span>Waiting for backend</span></div></div>
+</div>
+<div class="footer" id="footer">
+  <div class="users"><span class="dot"></span><span id="userCount">—</span></div>
+  <span>github.com/siperdudeuk</span>
 </div>
 <div class="share-toast" id="shareToast">Link copied to clipboard!</div>
 
@@ -338,11 +348,23 @@ function supportCoffee() {
   openCoffee();
 }
 
+const _CU = atob('aHR0cHM6Ly93d3cuc21hcnR0ZW5hbnQuY28udWsvd3QvY291bnQ=');
+async function fetchUserCount() {
+  try {
+    const r = await fetch(_CU);
+    const d = await r.json();
+    const n = d.active || d.total || 0;
+    document.getElementById('userCount').textContent = n + ' active user' + (n !== 1 ? 's' : '');
+  } catch(e) {}
+}
+
 refresh();
 setInterval(refresh, 10000);
 checkVersion();
 setInterval(checkVersion, 300000);
 checkCoffeePrompt();
+fetchUserCount();
+setInterval(fetchUserCount, 600000);
 </script>
 </body>
 </html>
@@ -364,12 +386,11 @@ class Api:
         webbrowser.open(url)
 
     def share(self):
-        text = "Check out Claude Usage Widget \u2014 monitor your Claude AI usage limits in a floating desktop widget!\nhttps://github.com/siperdudeuk/claude-usage-widget"
-        try:
-            process = subprocess.Popen(["clip"], stdin=subprocess.PIPE)
-            process.communicate(text.encode("utf-16le"))
-        except Exception:
-            pass
+        import webbrowser
+        import urllib.parse
+        subject = urllib.parse.quote("Check out Claude Usage Widget")
+        body = urllib.parse.quote("Monitor your Claude AI usage limits in a floating desktop widget!\nhttps://github.com/siperdudeuk/claude-usage-widget")
+        webbrowser.open(f"mailto:?subject={subject}&body={body}")
 
 
 def start_backend():

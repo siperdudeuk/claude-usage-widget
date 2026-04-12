@@ -1,5 +1,5 @@
 #!/bin/bash
-# Quick start — runs the backend + widget without installing as an app
+# Quick start — builds, installs, and launches Claude Usage Widget
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -12,9 +12,17 @@ if ! python3 -c "import cryptography" 2>/dev/null; then
 fi
 
 # Build if needed
-if [ ! -f ClaudeWidget ]; then
+if [ ! -d ClaudeWidget.app ]; then
     echo "First run — building widget..."
     bash build.sh
+fi
+
+# Install to ~/Applications so it shows in Launchpad/Spotlight
+mkdir -p ~/Applications
+if [ -d ClaudeWidget.app ]; then
+    rm -rf ~/Applications/ClaudeWidget.app
+    cp -R ClaudeWidget.app ~/Applications/ClaudeWidget.app
+    echo "Installed to ~/Applications/ClaudeWidget.app"
 fi
 
 # Stop any existing instances
@@ -27,11 +35,10 @@ nohup /usr/bin/python3 claude-usage.py > claude-usage.log 2>&1 &
 echo $! > claude-usage.pid
 echo "  Backend PID: $(cat claude-usage.pid)"
 
-sleep 6
+sleep 3
 
 if kill -0 "$(cat claude-usage.pid)" 2>/dev/null; then
     echo "  Backend: Running"
-    curl -s http://localhost:${CLAUDE_WIDGET_PORT:-9113}/api/usage | python3 -m json.tool 2>&1 | head -15
 else
     echo "  Backend: FAILED"
     cat claude-usage.log
@@ -39,8 +46,6 @@ else
 fi
 
 echo "Starting widget..."
-nohup ./ClaudeWidget > /dev/null 2>&1 &
-echo $! > claude-widget.pid
-echo "  Widget PID: $(cat claude-widget.pid)"
+open ClaudeWidget.app
 echo ""
-echo "Done! Look for the ⚡ icon in your menu bar."
+echo "Done! Claude Usage Widget is running — check your Dock."

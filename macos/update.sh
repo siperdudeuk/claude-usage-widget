@@ -20,6 +20,11 @@ fi
 echo "Rebuilding widget..."
 bash build.sh
 
+# Install to ~/Applications
+mkdir -p ~/Applications
+rm -rf ~/Applications/ClaudeWidget.app
+cp -R ClaudeWidget.app ~/Applications/ClaudeWidget.app
+
 # Restart: kill old processes, start new ones
 echo "Restarting..."
 pkill -f 'claude-usage.py' 2>/dev/null || true
@@ -29,7 +34,6 @@ sleep 1
 nohup /usr/bin/python3 claude-usage.py > claude-usage.log 2>&1 &
 echo $! > claude-usage.pid
 sleep 3
-nohup ./ClaudeWidget > /dev/null 2>&1 &
-echo $! > claude-widget.pid
+open ClaudeWidget.app
 
 echo "Update complete."
