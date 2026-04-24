@@ -6,15 +6,18 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_DIR"
 
+PYTHON_BIN="/usr/bin/python3"
+PIP_BIN="/usr/bin/pip3"
+
 echo "Pulling latest changes..."
 git pull --ff-only
 
 cd "$SCRIPT_DIR"
 
 # Reinstall deps if requirements changed
-if ! python3 -c "import cryptography" 2>/dev/null; then
+if ! "$PYTHON_BIN" -c "import cryptography" 2>/dev/null; then
     echo "Installing new dependencies..."
-    pip3 install -q -r requirements.txt
+    "$PIP_BIN" install -q -r requirements.txt
 fi
 
 echo "Rebuilding widget..."
@@ -31,7 +34,7 @@ pkill -f 'claude-usage.py' 2>/dev/null || true
 pkill -f 'ClaudeWidget' 2>/dev/null || true
 sleep 1
 
-nohup /usr/bin/python3 claude-usage.py > claude-usage.log 2>&1 &
+nohup "$PYTHON_BIN" claude-usage.py > claude-usage.log 2>&1 &
 echo $! > claude-usage.pid
 sleep 3
 open ClaudeWidget.app

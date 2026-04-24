@@ -248,20 +248,38 @@ async function refresh() {
 
     let html = '';
 
-    if (d.five_hour) {
-      html += renderMeter('5-Hour Limit', d.five_hour.utilization, d.five_hour.resets_at);
+    const LABELS = {
+      five_hour: ['5-Hour Limit', null],
+      seven_day: ['7-Day Limit', 'bar-blue'],
+      seven_day_opus: ['Opus (7-Day)', 'bar-purple'],
+      seven_day_sonnet: ['Sonnet (7-Day)', 'bar-green'],
+      seven_day_oauth_apps: ['OAuth Apps (7-Day)', 'bar-blue'],
+      seven_day_cowork: ['Claude Code (7-Day)', 'bar-purple'],
+      seven_day_omelette: ['Claude Design (7-Day)', 'bar-blue'],
+      iguana_necktie: ['Iguana (7-Day)', null],
+      omelette_promotional: ['Design Promo (7-Day)', null],
+    };
+    const ORDER = ['five_hour','seven_day','seven_day_opus','seven_day_sonnet',
+                   'seven_day_cowork','seven_day_omelette','seven_day_oauth_apps',
+                   'iguana_necktie','omelette_promotional'];
+    const seen = new Set();
+    function prettify(k) {
+      return k.replace(/_/g,' ').replace(/\\b\\w/g, c => c.toUpperCase());
     }
-
-    if (d.seven_day) {
-      html += renderMeter('7-Day Limit', d.seven_day.utilization, d.seven_day.resets_at, 'bar-blue');
+    for (const key of ORDER) {
+      if (!(key in d)) continue;
+      seen.add(key);
+      const v = d[key];
+      if (!v || typeof v !== 'object' || v.utilization == null) continue;
+      const [label, cls] = LABELS[key] || [prettify(key), null];
+      html += renderMeter(label, v.utilization, v.resets_at, cls);
     }
-
-    if (d.seven_day_opus && d.seven_day_opus.utilization != null) {
-      html += renderMeter('Opus (7-Day)', d.seven_day_opus.utilization, d.seven_day_opus.resets_at, 'bar-purple');
-    }
-
-    if (d.seven_day_sonnet && d.seven_day_sonnet.utilization != null) {
-      html += renderMeter('Sonnet (7-Day)', d.seven_day_sonnet.utilization, d.seven_day_sonnet.resets_at, 'bar-green');
+    for (const key of Object.keys(d)) {
+      if (seen.has(key)) continue;
+      const v = d[key];
+      if (!v || typeof v !== 'object' || v.utilization == null) continue;
+      const [label, cls] = LABELS[key] || [prettify(key), null];
+      html += renderMeter(label, v.utilization, v.resets_at, cls);
     }
 
     if (d.extra_usage) {
@@ -418,7 +436,7 @@ def main():
         "Claude Usage",
         html=WIDGET_HTML,
         width=320,
-        height=300,
+        height=440,
         resizable=True,
         frameless=True,
         on_top=True,

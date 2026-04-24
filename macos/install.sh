@@ -4,10 +4,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+PYTHON_BIN="/usr/bin/python3"
+PIP_BIN="/usr/bin/pip3"
+
 # Install Python dependencies if needed
-if ! python3 -c "import cryptography" 2>/dev/null; then
+if ! "$PYTHON_BIN" -c "import cryptography" 2>/dev/null; then
     echo "Installing dependencies..."
-    pip3 install -q -r requirements.txt
+    "$PIP_BIN" install -q -r requirements.txt
 fi
 
 # Build the widget

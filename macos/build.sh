@@ -36,6 +36,9 @@ if [ -f "$APP_NAME.icns" ]; then
     cp "$APP_NAME.icns" "$RESOURCES/$APP_NAME.icns"
 fi
 
+# Bundle the local backend so the app can self-start even when opened directly.
+cp claude-usage.py "$RESOURCES/claude-usage.py"
+
 # Create Info.plist
 cat > "$CONTENTS/Info.plist" << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

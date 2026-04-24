@@ -9,9 +9,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var dragOrigin = NSPoint.zero
     var windowOrigin = NSPoint.zero
     var statusItem: NSStatusItem!
+    var backendProcess: Process?
+    var backendLaunchAttempted = false
+    let backendPort = ProcessInfo.processInfo.environment["CLAUDE_WIDGET_PORT"] ?? "9113"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let frame = NSRect(x: 0, y: 0, width: 320, height: 280)
+        let frame = NSRect(x: 0, y: 0, width: 320, height: 440)
         window = NSWindow(
             contentRect: frame,
             styleMask: [.borderless, .resizable],
@@ -24,7 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
         window.isMovableByWindowBackground = true
-        window.minSize = NSSize(width: 260, height: 200)
+        window.minSize = NSSize(width: 280, height: 320)
 
         window.contentView?.wantsLayer = true
         window.contentView?.layer?.cornerRadius = 14
@@ -38,8 +41,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         window.contentView?.addSubview(webView)
 
-        let port = ProcessInfo.processInfo.environment["CLAUDE_WIDGET_PORT"] ?? "9113"
-        webView.loadHTMLString(usageHTML(port: port), baseURL: URL(string: "http://localhost:\(port)"))
+        webView.loadHTMLString(usageHTML(port: backendPort), baseURL: URL(string: "http://localhost:\(backendPort)"))
+        ensureBackendAndRefresh()
 
         // Position bottom-right
         if let screen = NSScreen.main {
@@ -51,6 +54,91 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         setupStatusItem()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func ensureBackendAndRefresh() {
+        if isBackendReady() {
+            refreshWidget()
+            return
+        }
+
+        startBundledBackendIfNeeded()
+
+        let deadline = Date().addingTimeInterval(15)
+        pollForBackend(until: deadline)
+    }
+
+    func refreshWidget() {
+        webView.evaluateJavaScript("refresh()", completionHandler: nil)
+        webView.evaluateJavaScript("checkVersion()", completionHandler: nil)
+    }
+
+    func pollForBackend(until deadline: Date) {
+        guard Date() < deadline else {
+            refreshWidget()
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            if self.isBackendReady() {
+                self.refreshWidget()
+            } else {
+                self.pollForBackend(until: deadline)
+            }
+        }
+    }
+
+    func isBackendReady() -> Bool {
+        guard let url = URL(string: "http://127.0.0.1:\(backendPort)/api/status") else { return false }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 1.5
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var success = false
+        let task = URLSession.shared.dataTask(with: request) { _, response, error in
+            if let http = response as? HTTPURLResponse, http.statusCode == 200, error == nil {
+                success = true
+            }
+            semaphore.signal()
+        }
+        task.resume()
+
+        let result = semaphore.wait(timeout: .now() + 2)
+        if result == .timedOut {
+            task.cancel()
+        }
+        return success
+    }
+
+    func startBundledBackendIfNeeded() {
+        guard !backendLaunchAttempted else { return }
+        backendLaunchAttempted = true
+
+        let fileManager = FileManager.default
+        let scriptPath = Bundle.main.path(forResource: "claude-usage", ofType: "py")
+            ?? Bundle.main.resourcePath.map { "\($0)/claude-usage.py" }
+
+        guard let scriptPath, fileManager.fileExists(atPath: scriptPath) else { return }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = [scriptPath]
+
+        var env = ProcessInfo.processInfo.environment
+        env["CLAUDE_WIDGET_PORT"] = backendPort
+        process.environment = env
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+
+        do {
+            try process.run()
+            backendProcess = process
+        } catch {
+            NSLog("ClaudeWidget failed to start backend: \(error.localizedDescription)")
+        }
     }
 
     func setupStatusItem() {
@@ -82,6 +170,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func quitApp() { NSApp.terminate(nil) }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        backendProcess?.terminate()
+    }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag || !window.isVisible {
@@ -264,7 +356,15 @@ func usageHTML(port: String) -> String {
 
     <script>
     const API_PORT = '\(port)';
+    const API_BASE = 'http://127.0.0.1:' + API_PORT;
     let isPinned = true;
+    let APP_BOOTED_AT = Date.now();
+    let STARTUP_GRACE_MS = 20000;
+    let STARTUP_RETRY_MS = 1000;
+    let STEADY_REFRESH_MS = 10000;
+    let VERSION_REFRESH_MS = 300000;
+    let USERCOUNT_REFRESH_MS = 600000;
+    let startupState = { retryTimer: null, steadyInterval: null };
     function togglePin() { window.webkit.messageHandlers.widget.postMessage({action:"togglePin"}); }
     function hideWidget() { window.webkit.messageHandlers.widget.postMessage({action:"hideWidget"}); }
     function openCoffee() { window.webkit.messageHandlers.widget.postMessage({action:"openCoffee"}); }
@@ -355,42 +455,85 @@ func usageHTML(port: String) -> String {
       return '<div class="setup-box"><h3>Setup</h3>' + steps + '</div>';
     }
 
+    function ensureSteadyRefresh() {
+      if (!startupState.steadyInterval) {
+        startupState.steadyInterval = setInterval(refresh, STEADY_REFRESH_MS);
+      }
+    }
+
+    function clearStartupRetry() {
+      if (startupState.retryTimer) {
+        clearTimeout(startupState.retryTimer);
+        startupState.retryTimer = null;
+      }
+    }
+
+    function scheduleStartupRetry() {
+      if (startupState.retryTimer) return;
+      startupState.retryTimer = setTimeout(() => {
+        startupState.retryTimer = null;
+        refresh();
+      }, STARTUP_RETRY_MS);
+    }
+
     async function refresh() {
       try {
-        const r = await fetch('http://localhost:' + API_PORT + '/api/usage');
+        const r = await fetch(API_BASE + '/api/usage');
         const d = await r.json();
 
         if (d.error) {
           // Fetch status to show setup guidance
           let status = null;
           try {
-            const sr = await fetch('http://localhost:' + API_PORT + '/api/status');
+            const sr = await fetch(API_BASE + '/api/status');
             status = await sr.json();
           } catch(e2) {}
           document.getElementById('content').innerHTML = renderSetup(status, d.error);
           document.getElementById('meta').textContent = d.error === 'Starting up...' ? 'Starting...' : 'Setup needed';
+          ensureSteadyRefresh();
           return;
         }
+
+        clearStartupRetry();
+        ensureSteadyRefresh();
 
         const ts = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : '—';
         document.getElementById('meta').textContent = 'Updated ' + ts + ' • Claude Max';
 
         let html = '';
 
-        if (d.five_hour) {
-          html += renderMeter('5-Hour Limit', d.five_hour.utilization, d.five_hour.resets_at);
+        const LABELS = {
+          five_hour: ['5-Hour Limit', null],
+          seven_day: ['7-Day Limit', 'bar-blue'],
+          seven_day_opus: ['Opus (7-Day)', 'bar-purple'],
+          seven_day_sonnet: ['Sonnet (7-Day)', 'bar-green'],
+          seven_day_oauth_apps: ['OAuth Apps (7-Day)', 'bar-blue'],
+          seven_day_cowork: ['Claude Code (7-Day)', 'bar-purple'],
+          seven_day_omelette: ['Claude Design (7-Day)', 'bar-blue'],
+          iguana_necktie: ['Iguana (7-Day)', null],
+          omelette_promotional: ['Design Promo (7-Day)', null],
+        };
+        const ORDER = ['five_hour','seven_day','seven_day_opus','seven_day_sonnet',
+                       'seven_day_cowork','seven_day_omelette','seven_day_oauth_apps',
+                       'iguana_necktie','omelette_promotional'];
+        const seen = new Set();
+        function prettify(k) {
+          return k.replace(/_/g,' ').replace(/\\b\\w/g, c => c.toUpperCase());
         }
-
-        if (d.seven_day) {
-          html += renderMeter('7-Day Limit', d.seven_day.utilization, d.seven_day.resets_at, 'bar-blue');
+        for (const key of ORDER) {
+          if (!(key in d)) continue;
+          seen.add(key);
+          const v = d[key];
+          if (!v || typeof v !== 'object' || v.utilization == null) continue;
+          const [label, cls] = LABELS[key] || [prettify(key), null];
+          html += renderMeter(label, v.utilization, v.resets_at, cls);
         }
-
-        if (d.seven_day_opus && d.seven_day_opus.utilization != null) {
-          html += renderMeter('Opus (7-Day)', d.seven_day_opus.utilization, d.seven_day_opus.resets_at, 'bar-purple');
-        }
-
-        if (d.seven_day_sonnet && d.seven_day_sonnet.utilization != null) {
-          html += renderMeter('Sonnet (7-Day)', d.seven_day_sonnet.utilization, d.seven_day_sonnet.resets_at, 'bar-green');
+        for (const key of Object.keys(d)) {
+          if (seen.has(key)) continue;
+          const v = d[key];
+          if (!v || typeof v !== 'object' || v.utilization == null) continue;
+          const [label, cls] = LABELS[key] || [prettify(key), null];
+          html += renderMeter(label, v.utilization, v.resets_at, cls);
         }
 
         if (d.extra_usage) {
@@ -409,17 +552,23 @@ func usageHTML(port: String) -> String {
 
         document.getElementById('content').innerHTML = html;
       } catch(e) {
+        const stillBooting = (Date.now() - APP_BOOTED_AT) < STARTUP_GRACE_MS;
         document.getElementById('content').innerHTML =
-          '<div class="setup-box"><h3>Starting up...</h3>' +
-          '<div class="setup-step"><span class="num">...</span><span>Waiting for backend to start</span></div>' +
-          '<div style="margin-top:8px;font-size:10px;color:var(--muted);">If this persists, run <b>./start.sh</b></div></div>';
-        document.getElementById('meta').textContent = 'Connecting...';
+          '<div class="setup-box"><h3>' + (stillBooting ? 'Starting backend...' : 'Backend unavailable') + '</h3>' +
+          '<div class="setup-step"><span class="num">...</span><span>' +
+            (stillBooting ? 'Retrying automatically' : 'The local usage service is not responding') +
+          '</span></div>' +
+          '<div style="margin-top:8px;font-size:10px;color:var(--muted);">' +
+            (stillBooting ? 'This usually takes a few seconds on launch.' : 'If this persists, run <b>./start.sh</b>.') +
+          '</div></div>';
+        document.getElementById('meta').textContent = stillBooting ? 'Starting local service...' : 'Backend unavailable';
+        scheduleStartupRetry();
       }
     }
 
     async function checkVersion() {
       try {
-        const r = await fetch('http://localhost:' + API_PORT + '/api/version');
+        const r = await fetch(API_BASE + '/api/version');
         const v = await r.json();
         const banner = document.getElementById('updateBanner');
         if (v.update_available) {
@@ -439,7 +588,7 @@ func usageHTML(port: String) -> String {
       const btn = document.getElementById('updateBtn');
       if (btn) { btn.disabled = true; btn.textContent = 'Updating...'; }
       try {
-        const r = await fetch('http://localhost:' + API_PORT + '/api/update', { method: 'POST' });
+        const r = await fetch(API_BASE + '/api/update', { method: 'POST' });
         const result = await r.json();
         if (result.success) {
           if (btn) btn.textContent = 'Done!';
@@ -489,12 +638,11 @@ func usageHTML(port: String) -> String {
     }
 
     refresh();
-    setInterval(refresh, 10000);
     checkVersion();
-    setInterval(checkVersion, 300000);
+    setInterval(checkVersion, VERSION_REFRESH_MS);
     checkCoffeePrompt();
     fetchUserCount();
-    setInterval(fetchUserCount, 600000);
+    setInterval(fetchUserCount, USERCOUNT_REFRESH_MS);
     </script>
     </body>
     </html>

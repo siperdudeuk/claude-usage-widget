@@ -105,7 +105,16 @@ def _decrypt_chrome_cookie(encrypted_value, key):
         nonce = encrypted_value[3:15]
         ciphertext = encrypted_value[15:]
         aesgcm = AESGCM(key)
-        return aesgcm.decrypt(nonce, ciphertext, None).decode("utf-8")
+        plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+        # Chrome 127+ prepends a 32-byte SHA256 origin-binding hash before the
+        # plaintext to prevent cross-origin cookie replay. Strip it when present.
+        if len(plaintext) >= 32:
+            tail = plaintext[32:]
+            try:
+                return tail.decode("utf-8")
+            except UnicodeDecodeError:
+                pass
+        return plaintext.decode("utf-8")
     else:
         # Old DPAPI-only encryption (pre-v80)
         import ctypes
@@ -180,24 +189,35 @@ def get_chrome_cookies():
     return cookies
 
 
+_cookie_dict = None
+
+
 def fetch_via_cookies(url):
-    """Make an authenticated request to claude.ai using extracted cookies."""
-    global _session_cookie, _cookie_last_refreshed
+    """Make an authenticated request to claude.ai using extracted cookies.
+
+    claude.ai sits behind Cloudflare bot management, which fingerprints TLS
+    and HTTP/2 settings. Plain urllib gets a 403 JS challenge. curl_cffi
+    impersonates Chrome's fingerprint so the request passes.
+    """
+    global _cookie_dict, _session_cookie, _cookie_last_refreshed
+
+    try:
+        from curl_cffi import requests as _cc
+    except ImportError:
+        raise Exception("curl_cffi not installed — run: pip install curl_cffi")
 
     now = time.time()
-    if _session_cookie is None or (now - _cookie_last_refreshed) > COOKIE_REFRESH_INTERVAL:
-        cookies = get_chrome_cookies()
-        cookie_parts = [f"{k}={v}" for k, v in cookies.items()]
-        _session_cookie = "; ".join(cookie_parts)
+    if _cookie_dict is None or (now - _cookie_last_refreshed) > COOKIE_REFRESH_INTERVAL:
+        _cookie_dict = get_chrome_cookies()
+        _session_cookie = "ready"  # marker so /api/status reports method=cookies
         _cookie_last_refreshed = now
 
-    req = urllib.request.Request(url, headers={
-        "Cookie": _session_cookie,
-        "User-Agent": "Claude-Usage-Widget/1.0",
-        "Accept": "application/json",
-    })
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return resp.read().decode("utf-8")
+    resp = _cc.get(url, cookies=_cookie_dict, impersonate="chrome", timeout=15)
+    if resp.status_code == 401:
+        raise urllib.error.HTTPError(url, 401, "Unauthorized", {}, None)
+    if resp.status_code >= 400:
+        raise Exception(f"HTTP {resp.status_code}: {resp.text[:200]}")
+    return resp.text
 
 
 def detect_org_id():

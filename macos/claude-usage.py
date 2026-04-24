@@ -91,6 +91,14 @@ def _decrypt_chrome_cookie(encrypted_value, key):
     # Remove PKCS7 padding
     unpadder = padding.PKCS7(128).unpadder()
     decrypted = unpadder.update(decrypted) + unpadder.finalize()
+    # Chrome 127+ prepends a 32-byte SHA256 origin-binding hash before the
+    # plaintext to prevent cross-origin cookie replay. Strip it when present.
+    if len(decrypted) >= 32:
+        tail = decrypted[32:]
+        try:
+            return tail.decode("utf-8")
+        except UnicodeDecodeError:
+            pass
     return decrypted.decode("utf-8")
 
 
@@ -139,24 +147,34 @@ def get_chrome_cookies():
     return cookies
 
 
+_cookie_dict = None
+
+
 def fetch_via_cookies(url):
-    """Make an authenticated request to claude.ai using extracted cookies."""
-    global _session_cookie, _cookie_last_refreshed
+    """Make an authenticated request to claude.ai using extracted cookies.
+
+    claude.ai sits behind Cloudflare bot management, which fingerprints TLS
+    and HTTP/2 settings. Plain urllib gets a 403 JS challenge. curl_cffi
+    impersonates Chrome's fingerprint so the request passes.
+    """
+    global _cookie_dict, _cookie_last_refreshed
+
+    try:
+        from curl_cffi import requests as _cc
+    except ImportError:
+        raise Exception("curl_cffi not installed — run: /usr/bin/python3 -m pip install --user curl_cffi")
 
     now = time.time()
-    if _session_cookie is None or (now - _cookie_last_refreshed) > COOKIE_REFRESH_INTERVAL:
-        cookies = get_chrome_cookies()
-        cookie_parts = [f"{k}={v}" for k, v in cookies.items()]
-        _session_cookie = "; ".join(cookie_parts)
+    if _cookie_dict is None or (now - _cookie_last_refreshed) > COOKIE_REFRESH_INTERVAL:
+        _cookie_dict = get_chrome_cookies()
         _cookie_last_refreshed = now
 
-    req = urllib.request.Request(url, headers={
-        "Cookie": _session_cookie,
-        "User-Agent": "Claude-Usage-Widget/1.0",
-        "Accept": "application/json",
-    })
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return resp.read().decode("utf-8")
+    resp = _cc.get(url, cookies=_cookie_dict, impersonate="chrome", timeout=15)
+    if resp.status_code == 401:
+        raise urllib.error.HTTPError(url, 401, "Unauthorized", {}, None)
+    if resp.status_code >= 400:
+        raise Exception(f"HTTP {resp.status_code}: {resp.text[:200]}")
+    return resp.text
 
 
 def detect_org_id_via_cookies():
@@ -172,8 +190,20 @@ def detect_org_id_via_cookies():
 # Method 2: AppleScript Chrome tab bridge (fallback)
 # ---------------------------------------------------------------------------
 
+def _is_chrome_running():
+    """Check whether Chrome is currently running, without launching it."""
+    result = subprocess.run(
+        ["osascript", "-e",
+         'tell application "System Events" to (name of processes) contains "Google Chrome"'],
+        capture_output=True, text=True, timeout=5,
+    )
+    return result.stdout.strip().lower() == "true"
+
+
 def fetch_via_chrome_tab(url):
     """Use AppleScript to run fetch() inside an existing claude.ai tab."""
+    if not _is_chrome_running():
+        raise Exception("Please open Chrome and go to claude.ai")
     script = '''
     tell application "Google Chrome"
         set foundTab to null
@@ -377,9 +407,16 @@ def run_update():
 
 
 def polling_loop():
-    global usage_data, _fetch_method, _session_cookie
+    global usage_data, _fetch_method, _session_cookie, ORG_ID
     while True:
         try:
+            if not ORG_ID:
+                detected = detect_org_id()
+                if detected:
+                    ORG_ID = detected
+                    print(f"  Detected org: {ORG_ID}")
+                else:
+                    raise Exception("Please open Chrome and go to claude.ai")
             data = collect_usage()
             with usage_lock:
                 usage_data = data
@@ -511,14 +548,12 @@ def main():
             ORG_ID = detected
             print(f"  Detected org: {ORG_ID}")
         else:
-            print("ERROR: Could not detect org ID.")
-            print("Options:")
-            print("  1. Set CLAUDE_ORG_ID environment variable")
-            print("  2. Make sure you're logged into claude.ai in Chrome")
-            print("  3. Install 'cryptography' package: pip3 install cryptography")
-            sys.exit(1)
+            print("  Org not detected yet — will retry from polling loop.")
+            with usage_lock:
+                usage_data["error"] = "Please open Chrome and go to claude.ai"
+                usage_data["timestamp"] = datetime.utcnow().isoformat() + "Z"
 
-    print(f"  Org:  {ORG_ID}")
+    print(f"  Org:  {ORG_ID or '(pending)'}")
     print(f"  Poll: {POLL_INTERVAL}s")
     print(f"  API:  http://localhost:{PORT}/api/usage")
     print()
