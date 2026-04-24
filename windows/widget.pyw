@@ -366,7 +366,7 @@ function supportCoffee() {
   openCoffee();
 }
 
-const _CU = atob('aHR0cHM6Ly93d3cuc21hcnR0ZW5hbnQuY28udWsvd3QvY291bnQ=');
+const _CU = atob('aHR0cHM6Ly93d3cuc21hcnRwcm9wZXJ0eXNvZnR3YXJlLmNvbS9hcGkvd3QvY291bnQ=');
 async function fetchUserCount() {
   try {
     const r = await fetch(_CU);

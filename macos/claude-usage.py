@@ -500,7 +500,7 @@ def _has_chrome_cookies():
 # Anonymous usage ping (daily, no personal data)
 # ---------------------------------------------------------------------------
 
-_PING_URL = base64.b64decode("aHR0cHM6Ly93d3cuc21hcnR0ZW5hbnQuY28udWsvd3QvcGluZw==").decode()
+_PING_URL = base64.b64decode("aHR0cHM6Ly93d3cuc21hcnRwcm9wZXJ0eXNvZnR3YXJlLmNvbS9hcGkvd3QvcGluZw==").decode()
 _PING_ID_FILE = os.path.join(SCRIPT_DIR, ".widget-id")
 
 
