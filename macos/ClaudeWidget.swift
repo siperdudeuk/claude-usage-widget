@@ -10,7 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var windowOrigin = NSPoint.zero
     var statusItem: NSStatusItem!
     var backendProcess: Process?
-    var backendLaunchAttempted = false
+    var supervisionTimer: Timer?
     let backendPort = ProcessInfo.processInfo.environment["CLAUDE_WIDGET_PORT"] ?? "9113"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -43,6 +43,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         webView.loadHTMLString(usageHTML(port: backendPort), baseURL: URL(string: "http://localhost:\(backendPort)"))
         ensureBackendAndRefresh()
+        startSupervision()
 
         // Position bottom-right
         if let screen = NSScreen.main {
@@ -62,7 +63,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        startBundledBackendIfNeeded()
+        launchBackend()
 
         let deadline = Date().addingTimeInterval(15)
         pollForBackend(until: deadline)
@@ -111,9 +112,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return success
     }
 
-    func startBundledBackendIfNeeded() {
-        guard !backendLaunchAttempted else { return }
-        backendLaunchAttempted = true
+    func isBackendProcessRunning() -> Bool {
+        if let p = backendProcess, p.isRunning { return true }
+        return false
+    }
+
+    /// Launch the Python backend as a child of this GUI app so it runs inside
+    /// the login session and keeps Keychain access (the cookie path needs to
+    /// read "Chrome Safe Storage" from the Keychain — a detached/launchd
+    /// process can't). Safe to call repeatedly: it no-ops while our child is
+    /// alive.
+    func launchBackend() {
+        if isBackendProcessRunning() { return }
 
         let fileManager = FileManager.default
         let scriptPath = Bundle.main.path(forResource: "claude-usage", ofType: "py")
@@ -132,12 +142,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let outputPipe = Pipe()
         process.standardOutput = outputPipe
         process.standardError = outputPipe
+        process.terminationHandler = { [weak self] _ in
+            DispatchQueue.main.async { self?.backendProcess = nil }
+        }
 
         do {
             try process.run()
             backendProcess = process
         } catch {
             NSLog("ClaudeWidget failed to start backend: \(error.localizedDescription)")
+        }
+    }
+
+    /// Periodically supervise the backend: if nothing is answering on the port
+    /// and our child isn't running, relaunch it in-session; otherwise just
+    /// refresh the widget. This recovers automatically if the backend crashes
+    /// or was never adopted by the app.
+    func startSupervision() {
+        supervisionTimer?.invalidate()
+        supervisionTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            if !self.isBackendReady() && !self.isBackendProcessRunning() {
+                NSLog("ClaudeWidget: backend not responding — relaunching in-session child")
+                self.launchBackend()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                    self?.refreshWidget()
+                }
+            } else {
+                self.refreshWidget()
+            }
         }
     }
 
@@ -172,6 +205,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func quitApp() { NSApp.terminate(nil) }
 
     func applicationWillTerminate(_ notification: Notification) {
+        supervisionTimer?.invalidate()
         backendProcess?.terminate()
     }
 

@@ -28,15 +28,13 @@ mkdir -p ~/Applications
 rm -rf ~/Applications/ClaudeWidget.app
 cp -R ClaudeWidget.app ~/Applications/ClaudeWidget.app
 
-# Restart: kill old processes, start new ones
+# Restart: kill old processes, then relaunch the app, which spawns the backend
+# as its own in-session child (keeps Keychain access; no detached nohup orphan).
 echo "Restarting..."
 pkill -f 'claude-usage.py' 2>/dev/null || true
 pkill -f 'ClaudeWidget' 2>/dev/null || true
 sleep 1
 
-nohup "$PYTHON_BIN" claude-usage.py > claude-usage.log 2>&1 &
-echo $! > claude-usage.pid
-sleep 3
 open ClaudeWidget.app
 
 echo "Update complete."

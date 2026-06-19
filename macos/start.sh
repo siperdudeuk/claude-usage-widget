@@ -35,22 +35,17 @@ pkill -f 'claude-usage.py' 2>/dev/null || true
 pkill -f 'ClaudeWidget' 2>/dev/null || true
 sleep 1
 
-echo "Starting backend..."
-nohup "$PYTHON_BIN" claude-usage.py > claude-usage.log 2>&1 &
-echo $! > claude-usage.pid
-echo "  Backend PID: $(cat claude-usage.pid)"
-
-if kill -0 "$(cat claude-usage.pid)" 2>/dev/null; then
-    echo "  Backend: Running"
-else
-    echo "  Backend: FAILED"
-    cat claude-usage.log
-    exit 1
-fi
+# Launch the widget. The app spawns the Python backend as its OWN child, so
+# the backend stays inside the GUI login session and keeps Keychain access
+# (the cookie path must read "Chrome Safe Storage" from the Keychain — a
+# detached/nohup'd backend that reparents to launchd cannot, which silently
+# breaks usage fetching). The app also supervises and respawns it if it dies.
+echo "Starting widget (it launches and supervises the backend in-session)..."
+open ClaudeWidget.app
 
 echo "Waiting for backend API..."
 READY=0
-for _ in $(seq 1 20); do
+for _ in $(seq 1 25); do
     if /usr/bin/curl -fsS --max-time 2 "http://127.0.0.1:9113/api/status" >/dev/null 2>&1; then
         READY=1
         break
@@ -59,14 +54,10 @@ for _ in $(seq 1 20); do
 done
 
 if [ "$READY" -ne 1 ]; then
-    echo "  Backend API: FAILED"
-    cat claude-usage.log
-    exit 1
+    echo "  Backend API: not ready yet — the widget will keep retrying."
+else
+    echo "  Backend API: Ready"
 fi
 
-echo "  Backend API: Ready"
-
-echo "Starting widget..."
-open ClaudeWidget.app
 echo ""
 echo "Done! Claude Usage Widget is running — check your Dock."

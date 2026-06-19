@@ -266,13 +266,28 @@ def detect_org_id_via_applescript():
 # ---------------------------------------------------------------------------
 
 def fetch_url(url):
-    """Fetch a URL from claude.ai, trying cookies first, then AppleScript."""
+    """Fetch a URL from claude.ai, trying cookies first, then AppleScript.
+
+    The previously-selected method is tried first, but we never stay *pinned*
+    to it: if it starts failing (e.g. the cookie path loses Keychain access
+    because the backend is running detached from the GUI login session), we
+    un-pin and re-run detection so we can fall back to the AppleScript
+    Chrome-tab bridge instead of erroring forever.
+    """
     global _fetch_method
 
     if _fetch_method == "cookies":
-        return fetch_via_cookies(url)
+        try:
+            return fetch_via_cookies(url)
+        except Exception as e:
+            print(f"  Cookie method stopped working, re-detecting: {e}")
+            _fetch_method = None
     elif _fetch_method == "applescript":
-        return fetch_via_chrome_tab(url)
+        try:
+            return fetch_via_chrome_tab(url)
+        except Exception as e:
+            print(f"  AppleScript method stopped working, re-detecting: {e}")
+            _fetch_method = None
 
     # Auto-detect: try cookies first
     try:
