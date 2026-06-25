@@ -479,11 +479,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
+            with usage_lock:
+                claude_err = usage_data.get("claude", {}).get("error")
+                codex_err = usage_data.get("codex", {}).get("error")
             status = {
                 "method": "cookies" if _session_cookie else None,
                 "org_id": ORG_ID or None,
                 "has_cryptography": _has_cryptography(),
                 "has_chrome_cookies": _has_chrome_cookies(),
+                "last_claude_error": claude_err,
+                "last_codex_error": codex_err,
                 **get_claude_auth_status(),
                 **get_codex_auth_status(),
             }

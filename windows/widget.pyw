@@ -282,12 +282,15 @@ function renderCodexExtras(d) {
 function renderCodexSetup(status, error) {
   const hasAuth = status && status.has_codex_auth;
   const source = status && status.codex_auth_source;
+  const ephemeral = status && status.codex_ephemeral;
   let steps = '';
-  if (!hasAuth) {
+  if (ephemeral) {
+    steps += '<div class="setup-step issue"><span class="num">!</span><span>Codex is using <b>ephemeral</b> credentials — set <b>cli_auth_credentials_store = "file"</b> in ~/.codex/config.toml and run <b>codex login</b></span></div>';
+  } else if (!hasAuth) {
     steps += '<div class="setup-step issue"><span class="num">1</span><span>Run <b>codex login</b> in Terminal (stores credentials in the OS keyring or <b>~/.codex/auth.json</b>)</span></div>';
   } else {
     const where = source === 'keyring' ? 'OS keyring' : (source === 'file' ? 'auth.json' : 'Codex CLI');
-    steps += '<div class="setup-step done"><span class="num">✓</span><span>Codex credentials found (' + where + ')</span></div>';
+    steps += '<div class="setup-step done"><span class="num">✓</span><span>Codex credentials found (' + where + ') — open CLI sessions keep these fresh</span></div>';
   }
   if (error && error !== 'Starting up...') {
     steps += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);color:var(--red);font-size:10px;">' + error + '</div>';
@@ -387,7 +390,7 @@ function renderSetup(status, error) {
     steps += '<div class="setup-step issue"><span class="num">1</span><span>Run <b>claude login</b> in Terminal (recommended — no Chrome needed)</span></div>';
   } else {
     const where = cliSource === 'keychain' ? 'OS keychain' : (cliSource === 'file' ? '.credentials.json' : 'Claude CLI');
-    steps += '<div class="setup-step done"><span class="num">✓</span><span>Claude CLI credentials found (' + where + ')</span></div>';
+    steps += '<div class="setup-step done"><span class="num">✓</span><span>Claude CLI credentials found (' + where + ') — open CLI sessions keep these fresh</span></div>';
   }
 
   if (!hasCliAuth) {

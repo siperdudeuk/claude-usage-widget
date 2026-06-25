@@ -144,9 +144,15 @@ def has_codex_credentials():
 
 
 def get_codex_auth_status():
+    codex_home = get_codex_home()
+    mode = _read_credentials_store_mode(codex_home)
     auth, source = load_codex_auth_record()
-    return {
+    status = {
         "has_codex_auth": auth is not None,
         "codex_auth_source": source,
-        "codex_home": get_codex_home(),
+        "codex_home": codex_home,
+        "codex_credentials_store": mode,
     }
+    if mode == "ephemeral":
+        status["codex_ephemeral"] = True
+    return status
