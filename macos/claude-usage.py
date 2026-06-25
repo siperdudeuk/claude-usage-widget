@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
-Claude Usage Monitor — Backend
-Fetches claude.ai usage data and serves it via local HTTP on port 9113.
+AI Usage Monitor — Backend
+Fetches Claude.ai and Codex (ChatGPT) usage data and serves it via local HTTP on port 9113.
 
-Auth methods (tried in order):
+Claude auth (tried in order):
   1. Direct cookie extraction from Chrome's cookie store (no browser tab needed)
   2. AppleScript bridge via an open claude.ai Chrome tab (fallback)
+
+Codex auth:
+  Reads ~/.codex/auth.json (from Codex CLI or desktop app login)
 """
 
 import subprocess
@@ -33,7 +36,11 @@ GITHUB_REPO = "siperdudeuk/claude-usage-widget"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(SCRIPT_DIR)  # parent of macos/
 
-usage_data = {"error": "Starting up...", "timestamp": None}
+usage_data = {
+    "timestamp": None,
+    "claude": {"error": "Starting up...", "timestamp": None},
+    "codex": {"error": "Starting up...", "timestamp": None},
+}
 usage_lock = threading.Lock()
 
 version_info = {
@@ -327,7 +334,7 @@ def detect_org_id():
     return None
 
 
-def collect_usage():
+def collect_claude_usage():
     """Fetch usage data from claude.ai."""
     url = f"https://claude.ai/api/organizations/{ORG_ID}/usage"
     raw = fetch_url(url)
@@ -335,6 +342,97 @@ def collect_usage():
     data["timestamp"] = datetime.utcnow().isoformat() + "Z"
     data["error"] = None
     return data
+
+
+# ---------------------------------------------------------------------------
+# Codex (ChatGPT) usage via ~/.codex/auth.json
+# ---------------------------------------------------------------------------
+
+CODEX_AUTH_PATH = os.path.expanduser("~/.codex/auth.json")
+CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+
+
+def _has_codex_auth():
+    return os.path.exists(CODEX_AUTH_PATH)
+
+
+def _load_codex_auth():
+    if not _has_codex_auth():
+        raise Exception("Codex auth not found — log into the Codex app or CLI (~/.codex/auth.json)")
+
+    with open(CODEX_AUTH_PATH, "r", encoding="utf-8") as f:
+        auth = json.load(f)
+
+    tokens = auth.get("tokens", auth)
+    access_token = tokens.get("access_token")
+    account_id = tokens.get("account_id")
+    if not access_token:
+        raise Exception("No access token in ~/.codex/auth.json — re-login to Codex")
+
+    return access_token, account_id
+
+
+def _codex_window_to_meter(window):
+    if not window or window.get("used_percent") is None:
+        return None
+    reset_at = None
+    reset_ts = window.get("reset_at")
+    if reset_ts:
+        reset_at = datetime.utcfromtimestamp(int(reset_ts)).isoformat() + "Z"
+    return {
+        "utilization": window["used_percent"],
+        "resets_at": reset_at,
+    }
+
+
+def _normalize_codex_usage(raw):
+    rate_limit = raw.get("rate_limit", {})
+    result = {
+        "error": None,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "plan_type": raw.get("plan_type"),
+        "five_hour": _codex_window_to_meter(rate_limit.get("primary_window")),
+        "weekly": _codex_window_to_meter(rate_limit.get("secondary_window")),
+    }
+
+    credits = raw.get("credits")
+    if credits:
+        result["credits"] = credits
+
+    if rate_limit.get("limit_reached"):
+        result["limit_reached"] = True
+
+    return result
+
+
+def fetch_codex_usage():
+    """Fetch Codex quota from ChatGPT backend API."""
+    try:
+        from curl_cffi import requests as _cc
+    except ImportError:
+        raise Exception("curl_cffi not installed — run: /usr/bin/python3 -m pip install --user curl_cffi")
+
+    access_token, account_id = _load_codex_auth()
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+        "Origin": "https://chatgpt.com",
+        "Referer": "https://chatgpt.com/",
+    }
+    if account_id:
+        headers["ChatGPT-Account-Id"] = account_id
+
+    resp = _cc.get(CODEX_USAGE_URL, headers=headers, impersonate="chrome", timeout=15)
+    if resp.status_code == 401:
+        raise Exception("Codex token expired — re-login to Codex")
+    if resp.status_code >= 400:
+        raise Exception(f"Codex HTTP {resp.status_code}: {resp.text[:200]}")
+    return _normalize_codex_usage(resp.json())
+
+
+def collect_codex_usage():
+    """Fetch and normalize Codex usage data."""
+    return fetch_codex_usage()
 
 
 # ---------------------------------------------------------------------------
@@ -421,9 +519,20 @@ def run_update():
         return {"success": False, "error": str(e)}
 
 
+def _provider_error(message):
+    return {
+        "error": message,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 def polling_loop():
     global usage_data, _fetch_method, _session_cookie, ORG_ID
     while True:
+        now = datetime.utcnow().isoformat() + "Z"
+        claude = {"error": None, "timestamp": now}
+        codex = {"error": None, "timestamp": now}
+
         try:
             if not ORG_ID:
                 detected = detect_org_id()
@@ -432,18 +541,26 @@ def polling_loop():
                     print(f"  Detected org: {ORG_ID}")
                 else:
                     raise Exception("Please open Chrome and go to claude.ai")
-            data = collect_usage()
-            with usage_lock:
-                usage_data = data
+            claude = collect_claude_usage()
         except Exception as e:
-            with usage_lock:
-                usage_data["error"] = str(e)
-                usage_data["timestamp"] = datetime.utcnow().isoformat() + "Z"
-            # If cookies failed mid-run, reset so next poll retries detection
+            claude = _provider_error(str(e))
             if _fetch_method == "cookies" and "HTTP Error 401" in str(e):
                 print("  Cookie auth expired, will re-extract next poll...")
                 _session_cookie = None
                 _cookie_last_refreshed = 0
+
+        try:
+            codex = collect_codex_usage()
+        except Exception as e:
+            codex = _provider_error(str(e))
+
+        with usage_lock:
+            usage_data = {
+                "timestamp": now,
+                "claude": claude,
+                "codex": codex,
+            }
+
         time.sleep(POLL_INTERVAL)
 
 
@@ -466,6 +583,7 @@ class Handler(BaseHTTPRequestHandler):
                 "org_id": ORG_ID or None,
                 "has_cryptography": _has_cryptography(),
                 "has_chrome_cookies": _has_chrome_cookies(),
+                "has_codex_auth": _has_codex_auth(),
             }
             self.wfile.write(json.dumps(status).encode())
         elif self.path == "/api/version":
@@ -536,7 +654,7 @@ def send_usage_ping():
         payload = json.dumps({"id": wid, "os": "macos", "v": commit[:8]}).encode()
         req = urllib.request.Request(_PING_URL, data=payload, headers={
             "Content-Type": "application/json",
-            "User-Agent": "Claude-Usage-Widget/1.0",
+            "User-Agent": "AI-Usage-Widget/1.0",
         })
         urllib.request.urlopen(req, timeout=10)
     except Exception:
@@ -553,7 +671,7 @@ def ping_loop():
 def main():
     global ORG_ID
 
-    print("Claude Usage Monitor starting...")
+    print("AI Usage Monitor starting...")
     print()
 
     if not ORG_ID:
@@ -565,7 +683,8 @@ def main():
         else:
             print("  Org not detected yet — will retry from polling loop.")
             with usage_lock:
-                usage_data["error"] = "Please open Chrome and go to claude.ai"
+                usage_data["claude"] = _provider_error("Please open Chrome and go to claude.ai")
+                usage_data["codex"] = _provider_error("Codex auth not found — log into the Codex app or CLI")
                 usage_data["timestamp"] = datetime.utcnow().isoformat() + "Z"
 
     print(f"  Org:  {ORG_ID or '(pending)'}")

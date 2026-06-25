@@ -2,7 +2,7 @@
 cd /d "%~dp0"
 
 echo ===================================
-echo  Claude Usage Widget — Install
+echo  AI Usage Widget — Install
 echo ===================================
 echo.
 
@@ -31,11 +31,11 @@ set SHORTCUT_DIR=%APPDATA%\Microsoft\Windows\Start Menu\Programs
 set VBS_TEMP=%TEMP%\create_shortcut.vbs
 
 echo Set oWS = WScript.CreateObject("WScript.Shell") > "%VBS_TEMP%"
-echo Set oLink = oWS.CreateShortcut("%SHORTCUT_DIR%\Claude Usage Widget.lnk") >> "%VBS_TEMP%"
+echo Set oLink = oWS.CreateShortcut("%SHORTCUT_DIR%\AI Usage Widget.lnk") >> "%VBS_TEMP%"
 echo oLink.TargetPath = "pythonw" >> "%VBS_TEMP%"
 echo oLink.Arguments = """%~dp0widget.pyw""" >> "%VBS_TEMP%"
 echo oLink.WorkingDirectory = "%~dp0" >> "%VBS_TEMP%"
-echo oLink.Description = "Claude AI Usage Monitor" >> "%VBS_TEMP%"
+echo oLink.Description = "Claude and Codex AI Usage Monitor" >> "%VBS_TEMP%"
 echo oLink.Save >> "%VBS_TEMP%"
 cscript //nologo "%VBS_TEMP%"
 del "%VBS_TEMP%"
@@ -45,9 +45,9 @@ echo ===================================
 echo  Installed successfully!
 echo.
 echo  You can now:
-echo    1. Search "Claude Usage Widget" in Start Menu
+echo    1. Search "AI Usage Widget" in Start Menu
 echo    2. Or run start.bat
 echo.
-echo  Make sure you're logged into claude.ai in Chrome.
+echo  Make sure you're logged into claude.ai in Chrome and Codex (~/.codex/auth.json).
 echo ===================================
 pause

@@ -46,9 +46,9 @@ cat > "$CONTENTS/Info.plist" << 'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Claude Usage</string>
+    <string>AI Usage Widget</string>
     <key>CFBundleDisplayName</key>
-    <string>Claude Usage</string>
+    <string>AI Usage Widget</string>
     <key>CFBundleIdentifier</key>
     <string>com.siperdudeuk.claude-usage-widget</string>
     <key>CFBundleVersion</key>
