@@ -219,7 +219,7 @@ const CODEX_LABELS = {
   weekly: ['Weekly Limit', 'bar-blue'],
 };
 const CODEX_ORDER = ['five_hour', 'weekly'];
-const META_KEYS = new Set(['error', 'timestamp', 'extra_usage', 'credits', 'plan_type', 'limit_reached']);
+const META_KEYS = new Set(['error', 'timestamp', 'extra_usage', 'credits', 'plan_type', 'limit_reached', 'auth_source']);
 
 function renderProviderMeters(data, labels, order) {
   let html = '';
@@ -322,7 +322,10 @@ function renderProviderBlock(name, data, status) {
 function formatMetaLine(d) {
   const ts = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : '—';
   const parts = [];
-  if (shouldShowProvider('claude') && d.claude && !d.claude.error) parts.push('Claude');
+  if (shouldShowProvider('claude') && d.claude && !d.claude.error) {
+    const via = d.claude.auth_source === 'cli' ? 'CLI' : 'Chrome';
+    parts.push('Claude (' + via + ')');
+  }
   if (shouldShowProvider('codex') && d.codex && !d.codex.error) {
     parts.push('Codex' + (d.codex.plan_type ? ' (' + d.codex.plan_type + ')' : ''));
   }
@@ -372,31 +375,38 @@ function renderMeter(label, pct, resetAt, barCls) {
 }
 
 function renderSetup(status, error) {
+  const hasCliAuth = status && status.has_claude_cli_auth;
+  const cliSource = status && status.claude_auth_source;
   const hasCrypto = status && status.has_cryptography;
   const hasCookies = status && status.has_chrome_cookies;
   const hasOrg = status && status.org_id;
   const method = status && status.method;
   let steps = '';
 
-  if (!hasCrypto) {
-    steps += '<div class="setup-step issue"><span class="num">1</span><span>Run: <b>pip install cryptography</b></span></div>';
+  if (!hasCliAuth) {
+    steps += '<div class="setup-step issue"><span class="num">1</span><span>Run <b>claude login</b> in Terminal (recommended — no Chrome needed)</span></div>';
   } else {
-    steps += '<div class="setup-step done"><span class="num">✓</span><span>cryptography package installed</span></div>';
+    const where = cliSource === 'keychain' ? 'OS keychain' : (cliSource === 'file' ? '.credentials.json' : 'Claude CLI');
+    steps += '<div class="setup-step done"><span class="num">✓</span><span>Claude CLI credentials found (' + where + ')</span></div>';
   }
 
-  if (!hasCookies) {
-    steps += '<div class="setup-step issue"><span class="num">2</span><span>Log into <b>claude.ai</b> in Chrome</span></div>';
-  } else {
-    steps += '<div class="setup-step done"><span class="num">✓</span><span>Chrome cookies found</span></div>';
+  if (!hasCliAuth) {
+    if (!hasCrypto) {
+      steps += '<div class="setup-step issue"><span class="num">2</span><span>Or install <b>cryptography</b> and log into <b>claude.ai</b> in Chrome</span></div>';
+    } else if (!hasCookies) {
+      steps += '<div class="setup-step issue"><span class="num">2</span><span>Or log into <b>claude.ai</b> in Chrome</span></div>';
+    } else {
+      steps += '<div class="setup-step done"><span class="num">✓</span><span>Chrome cookies found (fallback)</span></div>';
+    }
   }
 
-  if (!hasOrg) {
+  if (!hasCliAuth && !hasOrg) {
     steps += '<div class="setup-step issue"><span class="num">3</span><span>Waiting to detect your organisation...</span></div>';
-  } else {
+  } else if (!hasCliAuth && hasOrg) {
     steps += '<div class="setup-step done"><span class="num">✓</span><span>Organisation detected</span></div>';
   }
 
-  if (method) {
+  if (method && !hasCliAuth) {
     steps += '<div class="setup-step done"><span class="num">✓</span><span>Connected via ' + method + '</span></div>';
   }
 
@@ -404,7 +414,7 @@ function renderSetup(status, error) {
     steps += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);color:var(--red);font-size:10px;">' + error + '</div>';
   }
 
-  return '<div class="setup-box"><h3>Setup</h3>' + steps + '</div>';
+  return '<div class="setup-box"><h3>Claude Setup</h3>' + steps + '</div>';
 }
 
 async function refresh() {

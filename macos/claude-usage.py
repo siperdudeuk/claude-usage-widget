@@ -4,8 +4,9 @@ AI Usage Monitor — Backend
 Fetches Claude.ai and Codex (ChatGPT) usage data and serves it via local HTTP on port 9113.
 
 Claude auth (tried in order):
-  1. Direct cookie extraction from Chrome's cookie store (no browser tab needed)
-  2. AppleScript bridge via an open claude.ai Chrome tab (fallback)
+  1. Claude Code CLI OAuth (~/.claude/.credentials.json or OS keychain)
+  2. Direct cookie extraction from Chrome's cookie store (no browser tab needed)
+  3. AppleScript bridge via an open claude.ai Chrome tab (fallback)
 
 Codex auth:
   Reads ~/.codex/auth.json (from Codex CLI or desktop app login)
@@ -41,6 +42,7 @@ COMMON_DIR = os.path.join(REPO_DIR, "common")
 if os.path.isdir(COMMON_DIR) and COMMON_DIR not in sys.path:
     sys.path.insert(0, COMMON_DIR)
 
+from claude_auth import fetch_claude_oauth_usage, get_claude_auth_status, has_claude_credentials
 from codex_auth import get_codex_auth_status, has_codex_credentials, load_codex_credentials
 
 usage_data = {
@@ -341,14 +343,39 @@ def detect_org_id():
     return None
 
 
-def collect_claude_usage():
-    """Fetch usage data from claude.ai."""
+def collect_claude_usage_via_web():
+    """Fetch usage data from claude.ai using Chrome session cookies."""
+    global ORG_ID
+    if not ORG_ID:
+        detected = detect_org_id()
+        if detected:
+            ORG_ID = detected
+            print(f"  Detected org: {ORG_ID}")
+        else:
+            raise Exception("Please open Chrome and go to claude.ai")
     url = f"https://claude.ai/api/organizations/{ORG_ID}/usage"
     raw = fetch_url(url)
     data = json.loads(raw)
     data["timestamp"] = datetime.utcnow().isoformat() + "Z"
     data["error"] = None
+    data["auth_source"] = _fetch_method or "chrome"
     return data
+
+
+def collect_claude_usage():
+    """Fetch Claude usage, preferring Claude Code CLI OAuth over Chrome cookies."""
+    oauth_error = None
+    try:
+        return fetch_claude_oauth_usage()
+    except Exception as e:
+        oauth_error = str(e)
+
+    try:
+        return collect_claude_usage_via_web()
+    except Exception as web_error:
+        if oauth_error:
+            raise Exception(f"CLI: {oauth_error} | Chrome: {web_error}")
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -528,13 +555,6 @@ def polling_loop():
         codex = {"error": None, "timestamp": now}
 
         try:
-            if not ORG_ID:
-                detected = detect_org_id()
-                if detected:
-                    ORG_ID = detected
-                    print(f"  Detected org: {ORG_ID}")
-                else:
-                    raise Exception("Please open Chrome and go to claude.ai")
             claude = collect_claude_usage()
         except Exception as e:
             claude = _provider_error(str(e))
@@ -577,6 +597,7 @@ class Handler(BaseHTTPRequestHandler):
                 "org_id": ORG_ID or None,
                 "has_cryptography": _has_cryptography(),
                 "has_chrome_cookies": _has_chrome_cookies(),
+                **get_claude_auth_status(),
                 **get_codex_auth_status(),
             }
             self.wfile.write(json.dumps(status).encode())
@@ -677,7 +698,9 @@ def main():
         else:
             print("  Org not detected yet — will retry from polling loop.")
             with usage_lock:
-                usage_data["claude"] = _provider_error("Please open Chrome and go to claude.ai")
+                usage_data["claude"] = _provider_error(
+                    "Claude auth not found — run `claude login` or log into claude.ai in Chrome"
+                )
                 usage_data["codex"] = _provider_error(
                     "Codex auth not found — run `codex login` (keyring or ~/.codex/auth.json)"
                 )
