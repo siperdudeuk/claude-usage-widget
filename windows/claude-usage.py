@@ -30,6 +30,13 @@ UPDATE_CHECK_INTERVAL = 3600  # once per hour
 GITHUB_REPO = "siperdudeuk/claude-usage-widget"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(SCRIPT_DIR)
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+COMMON_DIR = os.path.join(REPO_DIR, "common")
+if os.path.isdir(COMMON_DIR) and COMMON_DIR not in sys.path:
+    sys.path.insert(0, COMMON_DIR)
+
+from codex_auth import get_codex_auth_status, has_codex_credentials, load_codex_credentials
 
 usage_data = {
     "timestamp": None,
@@ -245,31 +252,18 @@ def collect_claude_usage():
 
 
 # ---------------------------------------------------------------------------
-# Codex (ChatGPT) usage via ~/.codex/auth.json
+# Codex (ChatGPT) usage via Codex CLI credentials (keyring or auth.json)
 # ---------------------------------------------------------------------------
 
-CODEX_AUTH_PATH = os.path.expanduser("~/.codex/auth.json")
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 
 
 def _has_codex_auth():
-    return os.path.exists(CODEX_AUTH_PATH)
+    return has_codex_credentials()
 
 
 def _load_codex_auth():
-    if not _has_codex_auth():
-        raise Exception("Codex auth not found — log into the Codex app or CLI (~/.codex/auth.json)")
-
-    with open(CODEX_AUTH_PATH, "r", encoding="utf-8") as f:
-        auth = json.load(f)
-
-    tokens = auth.get("tokens", auth)
-    access_token = tokens.get("access_token")
-    account_id = tokens.get("account_id")
-    if not access_token:
-        raise Exception("No access token in ~/.codex/auth.json — re-login to Codex")
-
-    return access_token, account_id
+    return load_codex_credentials()
 
 
 def _codex_window_to_meter(window):
@@ -472,7 +466,7 @@ class Handler(BaseHTTPRequestHandler):
                 "org_id": ORG_ID or None,
                 "has_cryptography": _has_cryptography(),
                 "has_chrome_cookies": _has_chrome_cookies(),
-                "has_codex_auth": _has_codex_auth(),
+                **get_codex_auth_status(),
             }
             self.wfile.write(json.dumps(status).encode())
         elif self.path == "/api/version":

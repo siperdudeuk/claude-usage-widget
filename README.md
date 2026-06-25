@@ -131,7 +131,7 @@ All settings are via environment variables (set before launching):
 
 If `CLAUDE_ORG_ID` is not set, the backend auto-detects it from your Chrome session on first launch.
 
-Codex auth is read from `~/.codex/auth.json` (created when you log into the Codex app or CLI).
+Codex auth is read from the Codex CLI login (`codex login`). By default the CLI stores credentials in your **OS keyring**; you can also use file storage at `~/.codex/auth.json` by setting `cli_auth_credentials_store = "file"` in `~/.codex/config.toml`.
 
 ## License
 
