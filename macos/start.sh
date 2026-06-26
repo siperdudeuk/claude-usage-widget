@@ -1,5 +1,5 @@
 #!/bin/bash
-# Quick start — builds, installs, and launches Claude Usage Widget
+# Quick start — builds, installs, and launches AI Usage Widget
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -60,4 +60,4 @@ else
 fi
 
 echo ""
-echo "Done! Claude Usage Widget is running — check your Dock."
+echo "Done! AI Usage Widget is running — check your Dock."

@@ -14,7 +14,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let backendPort = ProcessInfo.processInfo.environment["CLAUDE_WIDGET_PORT"] ?? "9113"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let frame = NSRect(x: 0, y: 0, width: 320, height: 440)
+        let frame = NSRect(x: 0, y: 0, width: 340, height: 520)
         window = NSWindow(
             contentRect: frame,
             styleMask: [.borderless, .resizable],
@@ -27,7 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
         window.isMovableByWindowBackground = true
-        window.minSize = NSSize(width: 280, height: 320)
+        window.minSize = NSSize(width: 300, height: 380)
 
         window.contentView?.wantsLayer = true
         window.contentView?.layer?.cornerRadius = 14
@@ -183,7 +183,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Show/Hide Usage", action: #selector(toggleWindow), keyEquivalent: "u"))
         menu.addItem(NSMenuItem(title: "Pin on Top", action: #selector(togglePin), keyEquivalent: "p"))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit Claude Usage", action: #selector(quitApp), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit AI Usage Widget", action: #selector(quitApp), keyEquivalent: "q"))
         statusItem.menu = menu
     }
 
@@ -233,7 +233,7 @@ class MessageHandler: NSObject, WKScriptMessageHandler {
         }
         else if action == "share" {
             guard let webView = delegate?.webView else { return }
-            let text = "Check out Claude Usage Widget \u{2014} monitor your Claude AI usage limits in a floating desktop widget!"
+            let text = "Check out AI Usage Widget \u{2014} monitor your Claude and Codex AI usage limits in a floating desktop widget!"
             let url = URL(string: "https://github.com/siperdudeuk/claude-usage-widget")!
             let picker = NSSharingServicePicker(items: [text, url])
             let anchor = NSRect(x: webView.bounds.midX - 1, y: webView.bounds.maxY - 40, width: 2, height: 2)
@@ -266,15 +266,17 @@ func usageHTML(port: String) -> String {
         --yellow: #d29922; --red: #f85149; --blue: #58a6ff; --purple: #bc8cff;
       }
       * { box-sizing: border-box; margin: 0; padding: 0; }
+      html { height: 100%; }
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
         background: var(--bg); color: var(--text);
         -webkit-user-select: none; user-select: none;
         border-radius: 14px; overflow: hidden;
+        height: 100vh; display: flex; flex-direction: column;
       }
       .titlebar {
         display: flex; align-items: center; justify-content: space-between;
-        padding: 10px 14px 6px; cursor: grab;
+        padding: 8px 12px 5px; cursor: grab; flex: 0 0 auto;
       }
       .titlebar h1 { font-size: 13px; font-weight: 600; }
       .accent { color: var(--purple); }
@@ -288,40 +290,53 @@ func usageHTML(port: String) -> String {
       .ctrl-btn.pinned { background: rgba(188,140,255,0.2); color: var(--purple); }
       .ctrl-btn.coffee { background: rgba(255,221,0,0.15); color: #ffdd00; font-size: 13px; }
       .ctrl-btn.coffee:hover { background: rgba(255,221,0,0.3); }
-      .meta { font-size: 9px; color: var(--muted); padding: 0 14px 8px;
-        border-bottom: 1px solid var(--border); }
-      .content { padding: 10px 14px 14px; }
-      .meter { margin-bottom: 10px; }
-      .meter-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+      .meta {
+        font-size: 9px; color: var(--muted); padding: 0 12px 6px;
+        border-bottom: 1px solid var(--border); flex: 0 0 auto;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .content {
+        padding: 8px 10px 10px; flex: 1 1 auto; min-height: 0;
+        overflow-y: auto; overscroll-behavior: contain;
+      }
+      .content::-webkit-scrollbar { width: 6px; }
+      .content::-webkit-scrollbar-track { background: transparent; }
+      .content::-webkit-scrollbar-thumb { background: rgba(139,148,158,0.28); border-radius: 999px; }
+      .meter {
+        margin-bottom: 7px; padding: 7px 8px;
+        border: 1px solid rgba(48,54,61,0.38);
+        border-radius: 8px; background: rgba(22,27,34,0.46);
+      }
+      .meter-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px; }
       .meter-label { font-size: 11px; font-weight: 600; }
-      .meter-value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+      .meter-value { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
       .meter-sub { font-size: 10px; color: var(--muted); }
-      .bar-track { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 4px; }
+      .bar-track { height: 6px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 4px; }
       .bar-fill { height: 100%; border-radius: 4px; transition: width 0.8s ease; }
       .bar-purple { background: linear-gradient(90deg, var(--purple), #d4a0ff); }
       .bar-blue { background: linear-gradient(90deg, var(--blue), #79c0ff); }
       .bar-green { background: var(--green); }
       .bar-yellow { background: var(--yellow); }
       .bar-red { background: var(--red); }
-      .reset-time { font-size: 9px; color: var(--muted); margin-top: 2px; }
-      .divider { border-top: 1px solid var(--border); margin: 8px 0; }
-      .extra-row { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 0; }
+      .reset-time { font-size: 9px; color: var(--muted); margin-top: 3px; min-height: 11px; }
+      .divider { border-top: 1px solid var(--border); margin: 7px 0; }
+      .extra-row { display: flex; justify-content: space-between; gap: 10px; font-size: 10px; padding: 2px 1px; }
       .extra-label { color: var(--muted); }
       .error-box { background: rgba(248,81,73,0.1); border: 1px solid rgba(248,81,73,0.4);
-        border-radius: 8px; padding: 10px; color: var(--red); font-size: 11px; }
+        border-radius: 8px; padding: 9px; color: var(--red); font-size: 11px; }
       .setup-box { background: rgba(88,166,255,0.08); border: 1px solid rgba(88,166,255,0.3);
-        border-radius: 8px; padding: 12px; font-size: 11px; }
-      .setup-box h3 { font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--blue); }
-      .setup-step { display: flex; gap: 8px; padding: 4px 0; color: var(--muted); }
+        border-radius: 8px; padding: 10px; font-size: 11px; }
+      .setup-box h3 { font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--blue); }
+      .setup-step { display: flex; gap: 7px; padding: 3px 0; color: var(--muted); }
       .setup-step .num { color: var(--purple); font-weight: 700; min-width: 16px; }
       .setup-step.done { color: var(--green); }
       .setup-step.issue { color: var(--yellow); }
       .update-banner {
         background: linear-gradient(90deg, rgba(188,140,255,0.2), rgba(88,166,255,0.2));
         border: 1px solid rgba(188,140,255,0.5);
-        border-radius: 8px; padding: 8px 10px; margin: 0 14px 10px;
+        border-radius: 8px; padding: 7px 9px; margin: 0 10px 8px;
         display: flex; align-items: center; justify-content: space-between;
-        gap: 8px; font-size: 10px;
+        gap: 8px; font-size: 10px; flex: 0 0 auto;
       }
       .update-banner .msg { color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .update-banner .msg b { color: var(--purple); }
@@ -335,7 +350,7 @@ func usageHTML(port: String) -> String {
       .coffee-banner {
         background: linear-gradient(90deg, rgba(255,221,0,0.08), rgba(255,180,0,0.08));
         border: 1px solid rgba(255,221,0,0.25);
-        border-radius: 8px; padding: 8px 10px; margin: 0 14px 10px;
+        border-radius: 8px; padding: 7px 9px; margin: 0 10px 8px;
         display: flex; align-items: center; gap: 8px; font-size: 10px;
       }
       .coffee-banner .msg { color: var(--muted); flex: 1; }
@@ -358,23 +373,66 @@ func usageHTML(port: String) -> String {
         opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 99;
       }
       .share-toast.show { opacity: 1; }
-      .footer { padding: 6px 14px 10px; border-top: 1px solid var(--border);
+      .footer { padding: 5px 10px 8px; border-top: 1px solid var(--border);
         display: flex; justify-content: space-between; align-items: center;
-        font-size: 9px; color: var(--muted); }
+        gap: 8px; font-size: 9px; color: var(--muted); flex: 0 0 auto; }
+      .footer > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .footer .users { display: flex; align-items: center; gap: 4px; }
       .footer .users .dot { width: 5px; height: 5px; border-radius: 50%;
         background: var(--green); display: inline-block; }
+      .provider-tabs {
+        display: flex; gap: 4px; padding: 0 12px 7px;
+        border-bottom: 1px solid var(--border); flex: 0 0 auto;
+      }
+      .provider-tab {
+        flex: 1; padding: 4px 0; border: 1px solid var(--border);
+        border-radius: 6px; background: transparent; color: var(--muted);
+        font-size: 10px; font-weight: 600; cursor: pointer;
+      }
+      .provider-tab:hover { color: var(--text); background: rgba(88,166,255,0.08); }
+      .provider-tab.active { color: var(--text); border-color: rgba(188,140,255,0.5);
+        background: rgba(188,140,255,0.15); }
+      .provider-header {
+        display: flex; align-items: center; justify-content: space-between;
+        font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+        text-transform: uppercase; margin: 2px 0 6px;
+      }
+      .provider-header.claude { color: var(--purple); }
+      .provider-header.codex { color: var(--green); }
+      .provider-section + .provider-section { margin-top: 9px; padding-top: 5px;
+        border-top: 1px solid var(--border); }
+      .compact-note { color: var(--muted); font-size: 9px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+      .provider-note { color: var(--muted); font-size: 9px; margin: -2px 1px 5px; }
+      body.view-all .content { padding-top: 6px; }
+      body.view-all .provider-section + .provider-section { margin-top: 7px; padding-top: 4px; }
+      body.view-all .meter { padding: 6px 8px; margin-bottom: 6px; }
+      body.view-all .meter-value { font-size: 16px; }
+      body.view-all .reset-time { font-size: 8px; min-height: 10px; }
+      @media (max-height: 450px) {
+        .titlebar { padding-top: 6px; }
+        .ctrl-btn { width: 22px; height: 22px; }
+        .content { padding-top: 6px; }
+        .meter { padding: 6px 7px; margin-bottom: 6px; }
+        .meter-value { font-size: 15px; }
+        .reset-time { display: none; }
+        .footer { display: none; }
+      }
     </style>
     </head>
     <body>
     <div class="titlebar" id="titlebar">
-      <h1>⚡ Claude <span class="accent">Usage</span></h1>
+      <h1>⚡ AI <span class="accent">Usage</span></h1>
       <div class="controls">
         <button class="ctrl-btn" title="Share with friends" onclick="shareWidget()">📤</button>
         <button class="ctrl-btn coffee" title="Buy me a coffee" onclick="openCoffee()">☕</button>
         <button class="ctrl-btn pinned" id="pinBtn" title="Pin" onclick="togglePin()">📌</button>
         <button class="ctrl-btn" title="Hide" onclick="hideWidget()">✕</button>
       </div>
+    </div>
+    <div class="provider-tabs">
+      <button class="provider-tab active" data-view="all" onclick="setProviderView('all')">All</button>
+      <button class="provider-tab" data-view="claude" onclick="setProviderView('claude')">Claude</button>
+      <button class="provider-tab" data-view="codex" onclick="setProviderView('codex')">Codex</button>
     </div>
     <div class="meta" id="meta">Loading...</div>
     <div id="updateBanner" style="display:none"></div>
@@ -392,6 +450,8 @@ func usageHTML(port: String) -> String {
     const API_PORT = '\(port)';
     const API_BASE = 'http://127.0.0.1:' + API_PORT;
     let isPinned = true;
+    let providerView = localStorage.getItem('cw_provider_view') || 'all';
+    let lastStatus = null;
     let APP_BOOTED_AT = Date.now();
     let STARTUP_GRACE_MS = 20000;
     let STARTUP_RETRY_MS = 1000;
@@ -406,6 +466,180 @@ func usageHTML(port: String) -> String {
     function updatePinState(p) {
       isPinned = p;
       document.getElementById('pinBtn').className = p ? 'ctrl-btn pinned' : 'ctrl-btn';
+    }
+
+    function setProviderView(view) {
+      providerView = view;
+      localStorage.setItem('cw_provider_view', view);
+      document.body.classList.toggle('view-all', providerView === 'all');
+      document.querySelectorAll('.provider-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === view);
+      });
+      refresh();
+    }
+
+    function initProviderTabs() {
+      document.body.classList.toggle('view-all', providerView === 'all');
+      document.querySelectorAll('.provider-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === providerView);
+      });
+    }
+
+    function shouldShowProvider(name) {
+      return providerView === 'all' || providerView === String(name).toLowerCase();
+    }
+
+    function prettify(k) {
+      return k.replace(/_/g,' ').replace(/\\b\\w/g, c => c.toUpperCase());
+    }
+
+    const CLAUDE_LABELS = {
+      five_hour: ['5-Hour Limit', null],
+      seven_day: ['7-Day Limit', 'bar-blue'],
+      seven_day_opus: ['Opus (7-Day)', 'bar-purple'],
+      seven_day_sonnet: ['Sonnet (7-Day)', 'bar-green'],
+      seven_day_oauth_apps: ['OAuth Apps (7-Day)', 'bar-blue'],
+      seven_day_cowork: ['Claude Code (7-Day)', 'bar-purple'],
+      seven_day_omelette: ['Claude Design (7-Day)', 'bar-blue'],
+      iguana_necktie: ['Iguana (7-Day)', null],
+      omelette_promotional: ['Design Promo (7-Day)', null],
+    };
+    const CLAUDE_ORDER = ['five_hour','seven_day','seven_day_opus','seven_day_sonnet',
+                           'seven_day_cowork','seven_day_omelette','seven_day_oauth_apps',
+                           'iguana_necktie','omelette_promotional'];
+    const CODEX_LABELS = {
+      five_hour: ['5-Hour Limit', 'bar-green'],
+      weekly: ['Weekly Limit', 'bar-blue'],
+    };
+    const CODEX_ORDER = ['five_hour', 'weekly'];
+    const META_KEYS = new Set(['error', 'timestamp', 'extra_usage', 'credits', 'plan_type', 'limit_reached', 'auth_source']);
+
+    function renderProviderMeters(data, labels, order, maxMeters = Infinity) {
+      let html = '';
+      const seen = new Set();
+      let total = 0;
+      let shown = 0;
+      function addMeter(key) {
+        const v = data[key];
+        if (!v || typeof v !== 'object' || v.utilization == null) return;
+        total++;
+        if (shown >= maxMeters) return;
+        shown++;
+        const [label, cls] = labels[key] || [prettify(key), null];
+        html += renderMeter(label, v.utilization, v.resets_at, cls);
+      }
+      for (const key of order) {
+        if (!(key in data)) continue;
+        seen.add(key);
+        addMeter(key);
+      }
+      for (const key of Object.keys(data)) {
+        if (seen.has(key) || META_KEYS.has(key)) continue;
+        addMeter(key);
+      }
+      return { html, total, shown };
+    }
+
+    function renderClaudeExtras(d) {
+      if (!d.extra_usage) return '';
+      let html = '<div class="divider"></div>';
+      html += '<div class="extra-row"><span class="extra-label">Extra Credits</span><span>' +
+        (d.extra_usage.is_enabled ? '✓ Enabled' : '✗ Disabled') + '</span></div>';
+      if (d.extra_usage.monthly_limit != null) {
+        html += '<div class="extra-row"><span class="extra-label">Monthly Limit</span><span>$' +
+          (d.extra_usage.monthly_limit/100).toFixed(0) + '</span></div>';
+      }
+      if (d.extra_usage.used_credits != null) {
+        html += '<div class="extra-row"><span class="extra-label">Used This Month</span><span>$' +
+          (d.extra_usage.used_credits/100).toFixed(2) + '</span></div>';
+      }
+      return html;
+    }
+
+    function renderCodexExtras(d) {
+      if (!d.credits && !d.plan_type && !d.limit_reached) return '';
+      let html = '<div class="divider"></div>';
+      if (d.plan_type) {
+        html += '<div class="extra-row"><span class="extra-label">Plan</span><span>' +
+          d.plan_type + '</span></div>';
+      }
+      if (d.credits) {
+        html += '<div class="extra-row"><span class="extra-label">Credits</span><span>' +
+          (d.credits.has_credits ? '✓ Available' : '✗ None') + '</span></div>';
+        if (d.credits.balance != null) {
+          html += '<div class="extra-row"><span class="extra-label">Balance</span><span>$' +
+            d.credits.balance + '</span></div>';
+        }
+      }
+      if (d.limit_reached) {
+        html += '<div class="extra-row"><span class="extra-label">Status</span><span style="color:var(--red)">Limit reached</span></div>';
+      }
+      return html;
+    }
+
+    function renderCodexSetup(status, error) {
+      const hasAuth = status && status.has_codex_auth;
+      const source = status && status.codex_auth_source;
+      const ephemeral = status && status.codex_ephemeral;
+      let steps = '';
+      if (ephemeral) {
+        steps += '<div class="setup-step issue"><span class="num">!</span><span>Codex is using <b>ephemeral</b> credentials — set <b>cli_auth_credentials_store = "file"</b> in ~/.codex/config.toml and run <b>codex login</b></span></div>';
+      } else if (!hasAuth) {
+        steps += '<div class="setup-step issue"><span class="num">1</span><span>Run <b>codex login</b> in Terminal (stores credentials in the OS keyring or <b>~/.codex/auth.json</b>)</span></div>';
+      } else {
+        const where = source === 'keyring' ? 'OS keyring' : (source === 'file' ? 'auth.json' : 'Codex CLI');
+        steps += '<div class="setup-step done"><span class="num">✓</span><span>Codex credentials found (' + where + ') — open CLI sessions keep these fresh</span></div>';
+      }
+      if (error && error !== 'Starting up...') {
+        steps += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);color:var(--red);font-size:10px;">' + error + '</div>';
+      }
+      return '<div class="setup-box"><h3>Codex Setup</h3>' + steps + '</div>';
+    }
+
+    function renderProviderBlock(name, data, status) {
+      if (!shouldShowProvider(name)) return '';
+      const key = name.toLowerCase();
+      let html = '<div class="provider-section">';
+      if (providerView === 'all') {
+        html += '<div class="provider-header ' + key + '">' + name + '</div>';
+      }
+      if (data.error) {
+        html += name === 'Claude'
+          ? renderSetup(status, data.error)
+          : renderCodexSetup(status, data.error);
+      } else {
+        const compactAll = providerView === 'all';
+        const maxMeters = compactAll ? 2 : Infinity;
+        const labels = name === 'Claude' ? CLAUDE_LABELS : CODEX_LABELS;
+        const order = name === 'Claude' ? CLAUDE_ORDER : CODEX_ORDER;
+        const meters = renderProviderMeters(data, labels, order, maxMeters);
+        if (name === 'Claude') {
+          html += meters.html;
+          if (!compactAll) html += renderClaudeExtras(data);
+        } else {
+          html += meters.html;
+          if (!compactAll) html += renderCodexExtras(data);
+        }
+        if (compactAll && meters.total > meters.shown) {
+          html += '<div class="provider-note">Showing key limits — open the ' + name + ' tab for all ' + meters.total + '.</div>';
+        }
+      }
+      html += '</div>';
+      return html;
+    }
+
+    function formatMetaLine(d) {
+      const ts = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : '—';
+      const parts = [];
+      if (shouldShowProvider('claude') && d.claude && !d.claude.error) {
+        const via = d.claude.auth_source === 'cli' ? 'CLI' : 'Chrome';
+        parts.push('Claude (' + via + ')');
+      }
+      if (shouldShowProvider('codex') && d.codex && !d.codex.error) {
+        parts.push('Codex' + (d.codex.plan_type ? ' (' + d.codex.plan_type + ')' : ''));
+      }
+      if (!parts.length) return 'Updated ' + ts;
+      return 'Updated ' + ts + ' • ' + parts.join(' + ');
     }
 
     const titlebar = document.getElementById('titlebar');
@@ -453,6 +687,8 @@ func usageHTML(port: String) -> String {
     }
 
     function renderSetup(status, error) {
+      const hasCliAuth = status && status.has_claude_cli_auth;
+      const cliSource = status && status.claude_auth_source;
       const hasCrypto = status && status.has_cryptography;
       const hasCookies = status && status.has_chrome_cookies;
       const hasOrg = status && status.org_id;
@@ -460,25 +696,30 @@ func usageHTML(port: String) -> String {
 
       let steps = '';
 
-      if (!hasCrypto) {
-        steps += '<div class="setup-step issue"><span class="num">1</span><span>Run: <b>pip3 install cryptography</b></span></div>';
+      if (!hasCliAuth) {
+        steps += '<div class="setup-step issue"><span class="num">1</span><span>Run <b>claude login</b> in Terminal (recommended — no Chrome needed)</span></div>';
       } else {
-        steps += '<div class="setup-step done"><span class="num">✓</span><span>cryptography package installed</span></div>';
+        const where = cliSource === 'keychain' ? 'OS keychain' : (cliSource === 'file' ? '.credentials.json' : 'Claude CLI');
+        steps += '<div class="setup-step done"><span class="num">✓</span><span>Claude CLI credentials found (' + where + ') — open CLI sessions keep these fresh</span></div>';
       }
 
-      if (!hasCookies) {
-        steps += '<div class="setup-step issue"><span class="num">2</span><span>Log into <b>claude.ai</b> in Chrome</span></div>';
-      } else {
-        steps += '<div class="setup-step done"><span class="num">✓</span><span>Chrome cookies found</span></div>';
+      if (!hasCliAuth) {
+        if (!hasCrypto) {
+          steps += '<div class="setup-step issue"><span class="num">2</span><span>Or install <b>cryptography</b> and log into <b>claude.ai</b> in Chrome</span></div>';
+        } else if (!hasCookies) {
+          steps += '<div class="setup-step issue"><span class="num">2</span><span>Or log into <b>claude.ai</b> in Chrome</span></div>';
+        } else {
+          steps += '<div class="setup-step done"><span class="num">✓</span><span>Chrome cookies found (fallback)</span></div>';
+        }
       }
 
-      if (!hasOrg) {
+      if (!hasCliAuth && !hasOrg) {
         steps += '<div class="setup-step issue"><span class="num">3</span><span>Waiting to detect your organisation...</span></div>';
-      } else {
+      } else if (!hasCliAuth && hasOrg) {
         steps += '<div class="setup-step done"><span class="num">✓</span><span>Organisation detected</span></div>';
       }
 
-      if (method) {
+      if (method && !hasCliAuth) {
         steps += '<div class="setup-step done"><span class="num">✓</span><span>Connected via ' + method + '</span></div>';
       }
 
@@ -486,7 +727,7 @@ func usageHTML(port: String) -> String {
         steps += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);color:var(--red);font-size:10px;">' + error + '</div>';
       }
 
-      return '<div class="setup-box"><h3>Setup</h3>' + steps + '</div>';
+      return '<div class="setup-box"><h3>Claude Setup</h3>' + steps + '</div>';
     }
 
     function ensureSteadyRefresh() {
@@ -514,16 +755,28 @@ func usageHTML(port: String) -> String {
       try {
         const r = await fetch(API_BASE + '/api/usage');
         const d = await r.json();
+        const claude = d.claude || { error: 'No Claude data' };
+        const codex = d.codex || { error: 'No Codex data' };
 
-        if (d.error) {
-          // Fetch status to show setup guidance
-          let status = null;
-          try {
-            const sr = await fetch(API_BASE + '/api/status');
-            status = await sr.json();
-          } catch(e2) {}
-          document.getElementById('content').innerHTML = renderSetup(status, d.error);
-          document.getElementById('meta').textContent = d.error === 'Starting up...' ? 'Starting...' : 'Setup needed';
+        let status = lastStatus;
+        try {
+          const sr = await fetch(API_BASE + '/api/status');
+          status = await sr.json();
+          lastStatus = status;
+        } catch(e2) {}
+
+        const claudeStarting = claude.error === 'Starting up...';
+        const codexStarting = codex.error === 'Starting up...';
+        const showClaude = shouldShowProvider('claude');
+        const showCodex = shouldShowProvider('codex');
+        const claudeReady = !claude.error;
+        const codexReady = !codex.error;
+
+        if ((showClaude && claudeStarting || showCodex && codexStarting) && !claudeReady && !codexReady) {
+          document.getElementById('content').innerHTML =
+            renderProviderBlock('Claude', claude, status) +
+            renderProviderBlock('Codex', codex, status);
+          document.getElementById('meta').textContent = 'Starting...';
           ensureSteadyRefresh();
           return;
         }
@@ -531,59 +784,12 @@ func usageHTML(port: String) -> String {
         clearStartupRetry();
         ensureSteadyRefresh();
 
-        const ts = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : '—';
-        document.getElementById('meta').textContent = 'Updated ' + ts + ' • Claude Max';
-
-        let html = '';
-
-        const LABELS = {
-          five_hour: ['5-Hour Limit', null],
-          seven_day: ['7-Day Limit', 'bar-blue'],
-          seven_day_opus: ['Opus (7-Day)', 'bar-purple'],
-          seven_day_sonnet: ['Sonnet (7-Day)', 'bar-green'],
-          seven_day_oauth_apps: ['OAuth Apps (7-Day)', 'bar-blue'],
-          seven_day_cowork: ['Claude Code (7-Day)', 'bar-purple'],
-          seven_day_omelette: ['Claude Design (7-Day)', 'bar-blue'],
-          iguana_necktie: ['Iguana (7-Day)', null],
-          omelette_promotional: ['Design Promo (7-Day)', null],
-        };
-        const ORDER = ['five_hour','seven_day','seven_day_opus','seven_day_sonnet',
-                       'seven_day_cowork','seven_day_omelette','seven_day_oauth_apps',
-                       'iguana_necktie','omelette_promotional'];
-        const seen = new Set();
-        function prettify(k) {
-          return k.replace(/_/g,' ').replace(/\\b\\w/g, c => c.toUpperCase());
+        document.getElementById('meta').textContent = formatMetaLine(d);
+        let html = renderProviderBlock('Claude', claude, status) +
+                   renderProviderBlock('Codex', codex, status);
+        if (!html.trim()) {
+          html = '<div class="error-box">No usage data for the selected view.</div>';
         }
-        for (const key of ORDER) {
-          if (!(key in d)) continue;
-          seen.add(key);
-          const v = d[key];
-          if (!v || typeof v !== 'object' || v.utilization == null) continue;
-          const [label, cls] = LABELS[key] || [prettify(key), null];
-          html += renderMeter(label, v.utilization, v.resets_at, cls);
-        }
-        for (const key of Object.keys(d)) {
-          if (seen.has(key)) continue;
-          const v = d[key];
-          if (!v || typeof v !== 'object' || v.utilization == null) continue;
-          const [label, cls] = LABELS[key] || [prettify(key), null];
-          html += renderMeter(label, v.utilization, v.resets_at, cls);
-        }
-
-        if (d.extra_usage) {
-          html += '<div class="divider"></div>';
-          html += '<div class="extra-row"><span class="extra-label">Extra Credits</span><span>' +
-            (d.extra_usage.is_enabled ? '✓ Enabled' : '✗ Disabled') + '</span></div>';
-          if (d.extra_usage.monthly_limit != null) {
-            html += '<div class="extra-row"><span class="extra-label">Monthly Limit</span><span>$' +
-              (d.extra_usage.monthly_limit/100).toFixed(0) + '</span></div>';
-          }
-          if (d.extra_usage.used_credits != null) {
-            html += '<div class="extra-row"><span class="extra-label">Used This Month</span><span>$' +
-              (d.extra_usage.used_credits/100).toFixed(2) + '</span></div>';
-          }
-        }
-
         document.getElementById('content').innerHTML = html;
       } catch(e) {
         const stillBooting = (Date.now() - APP_BOOTED_AT) < STARTUP_GRACE_MS;
@@ -672,6 +878,7 @@ func usageHTML(port: String) -> String {
     }
 
     refresh();
+    initProviderTabs();
     checkVersion();
     setInterval(checkVersion, VERSION_REFRESH_MS);
     checkCoffeePrompt();

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Claude Usage Monitor — Backend (Windows)
-Fetches claude.ai usage data and serves it via local HTTP on port 9113.
+AI Usage Monitor — Backend (Windows)
+Fetches Claude.ai and Codex (ChatGPT) usage data and serves it via local HTTP on port 9113.
 
-Auth method: Direct cookie extraction from Chrome's cookie store using DPAPI.
+Claude auth: Claude Code CLI OAuth first, then Chrome cookie extraction (DPAPI).
+Codex auth: Reads ~/.codex/auth.json (from Codex CLI or desktop app login)
 """
 
 import json
@@ -29,8 +30,20 @@ UPDATE_CHECK_INTERVAL = 3600  # once per hour
 GITHUB_REPO = "siperdudeuk/claude-usage-widget"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(SCRIPT_DIR)
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+COMMON_DIR = os.path.join(REPO_DIR, "common")
+if os.path.isdir(COMMON_DIR) and COMMON_DIR not in sys.path:
+    sys.path.insert(0, COMMON_DIR)
 
-usage_data = {"error": "Starting up...", "timestamp": None}
+from claude_auth import fetch_claude_oauth_usage, get_claude_auth_status, has_claude_credentials
+from codex_auth import get_codex_auth_status, has_codex_credentials, load_codex_credentials
+
+usage_data = {
+    "timestamp": None,
+    "claude": {"error": "Starting up...", "timestamp": None},
+    "codex": {"error": "Starting up...", "timestamp": None},
+}
 usage_lock = threading.Lock()
 
 version_info = {
@@ -229,14 +242,109 @@ def detect_org_id():
     return None
 
 
-def collect_usage():
-    """Fetch usage data from claude.ai."""
+def collect_claude_usage_via_web():
+    """Fetch usage data from claude.ai using Chrome session cookies."""
     url = f"https://claude.ai/api/organizations/{ORG_ID}/usage"
     raw = fetch_via_cookies(url)
     data = json.loads(raw)
     data["timestamp"] = datetime.utcnow().isoformat() + "Z"
     data["error"] = None
+    data["auth_source"] = "chrome"
     return data
+
+
+def collect_claude_usage():
+    """Fetch Claude usage, preferring Claude Code CLI OAuth over Chrome cookies."""
+    oauth_error = None
+    try:
+        return fetch_claude_oauth_usage()
+    except Exception as e:
+        oauth_error = str(e)
+
+    try:
+        return collect_claude_usage_via_web()
+    except Exception as web_error:
+        if oauth_error:
+            raise Exception(f"CLI: {oauth_error} | Chrome: {web_error}")
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Codex (ChatGPT) usage via Codex CLI credentials (keyring or auth.json)
+# ---------------------------------------------------------------------------
+
+CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+
+
+def _has_codex_auth():
+    return has_codex_credentials()
+
+
+def _load_codex_auth():
+    return load_codex_credentials()
+
+
+def _codex_window_to_meter(window):
+    if not window or window.get("used_percent") is None:
+        return None
+    reset_at = None
+    reset_ts = window.get("reset_at")
+    if reset_ts:
+        reset_at = datetime.utcfromtimestamp(int(reset_ts)).isoformat() + "Z"
+    return {
+        "utilization": window["used_percent"],
+        "resets_at": reset_at,
+    }
+
+
+def _normalize_codex_usage(raw):
+    rate_limit = raw.get("rate_limit", {})
+    result = {
+        "error": None,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "plan_type": raw.get("plan_type"),
+        "five_hour": _codex_window_to_meter(rate_limit.get("primary_window")),
+        "weekly": _codex_window_to_meter(rate_limit.get("secondary_window")),
+    }
+
+    credits = raw.get("credits")
+    if credits:
+        result["credits"] = credits
+
+    if rate_limit.get("limit_reached"):
+        result["limit_reached"] = True
+
+    return result
+
+
+def fetch_codex_usage():
+    """Fetch Codex quota from ChatGPT backend API."""
+    try:
+        from curl_cffi import requests as _cc
+    except ImportError:
+        raise Exception("curl_cffi not installed — run: pip install curl_cffi")
+
+    access_token, account_id = _load_codex_auth()
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+        "Origin": "https://chatgpt.com",
+        "Referer": "https://chatgpt.com/",
+    }
+    if account_id:
+        headers["ChatGPT-Account-Id"] = account_id
+
+    resp = _cc.get(CODEX_USAGE_URL, headers=headers, impersonate="chrome", timeout=15)
+    if resp.status_code == 401:
+        raise Exception("Codex token expired — re-login to Codex")
+    if resp.status_code >= 400:
+        raise Exception(f"Codex HTTP {resp.status_code}: {resp.text[:200]}")
+    return _normalize_codex_usage(resp.json())
+
+
+def collect_codex_usage():
+    """Fetch and normalize Codex usage data."""
+    return fetch_codex_usage()
 
 
 # ---------------------------------------------------------------------------
@@ -319,21 +427,41 @@ def run_update():
         return {"success": False, "error": str(e)}
 
 
+def _provider_error(message):
+    return {
+        "error": message,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 def polling_loop():
     global usage_data, _session_cookie, _cookie_last_refreshed
     while True:
+        now = datetime.utcnow().isoformat() + "Z"
+        claude = {"error": None, "timestamp": now}
+        codex = {"error": None, "timestamp": now}
+
         try:
-            data = collect_usage()
-            with usage_lock:
-                usage_data = data
+            claude = collect_claude_usage()
         except Exception as e:
-            with usage_lock:
-                usage_data["error"] = str(e)
-                usage_data["timestamp"] = datetime.utcnow().isoformat() + "Z"
+            claude = _provider_error(str(e))
             if "HTTP Error 401" in str(e):
                 print("  Cookie auth expired, will re-extract next poll...")
                 _session_cookie = None
                 _cookie_last_refreshed = 0
+
+        try:
+            codex = collect_codex_usage()
+        except Exception as e:
+            codex = _provider_error(str(e))
+
+        with usage_lock:
+            usage_data = {
+                "timestamp": now,
+                "claude": claude,
+                "codex": codex,
+            }
+
         time.sleep(POLL_INTERVAL)
 
 
@@ -351,11 +479,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
+            with usage_lock:
+                claude_err = usage_data.get("claude", {}).get("error")
+                codex_err = usage_data.get("codex", {}).get("error")
             status = {
                 "method": "cookies" if _session_cookie else None,
                 "org_id": ORG_ID or None,
                 "has_cryptography": _has_cryptography(),
                 "has_chrome_cookies": _has_chrome_cookies(),
+                "last_claude_error": claude_err,
+                "last_codex_error": codex_err,
+                **get_claude_auth_status(),
+                **get_codex_auth_status(),
             }
             self.wfile.write(json.dumps(status).encode())
         elif self.path == "/api/version":
@@ -430,7 +565,7 @@ def send_usage_ping():
         payload = json.dumps({"id": wid, "os": "windows", "v": commit[:8]}).encode()
         req = urllib.request.Request(_PING_URL, data=payload, headers={
             "Content-Type": "application/json",
-            "User-Agent": "Claude-Usage-Widget/1.0",
+            "User-Agent": "AI-Usage-Widget/1.0",
         })
         urllib.request.urlopen(req, timeout=10)
     except Exception:
@@ -447,7 +582,7 @@ def ping_loop():
 def main():
     global ORG_ID
 
-    print("Claude Usage Monitor starting...")
+    print("AI Usage Monitor starting...")
     print()
 
     if not ORG_ID:
@@ -457,19 +592,25 @@ def main():
             if detected:
                 ORG_ID = detected
                 print(f"  Detected org: {ORG_ID}")
+            elif has_claude_credentials():
+                print("  Org not detected — will use Claude CLI OAuth instead of Chrome cookies.")
             else:
-                print("ERROR: Could not detect org ID.")
-                print("Options:")
-                print("  1. Set CLAUDE_ORG_ID environment variable")
-                print("  2. Make sure you're logged into claude.ai in Chrome")
-                print("  3. Install 'cryptography' package: pip install cryptography")
-                sys.exit(1)
+                print("  Org not detected yet — will retry from polling loop.")
+                with usage_lock:
+                    usage_data["claude"] = _provider_error(
+                        "Claude auth not found — run `claude login` or log into claude.ai in Chrome"
+                    )
+                    usage_data["timestamp"] = datetime.utcnow().isoformat() + "Z"
         except Exception as e:
-            print(f"ERROR: {e}")
-            print("Make sure Chrome is closed or you're logged into claude.ai.")
-            sys.exit(1)
+            if has_claude_credentials():
+                print(f"  Chrome cookie detection unavailable ({e}); using Claude CLI OAuth.")
+            else:
+                print(f"  Org detection failed: {e}")
+                with usage_lock:
+                    usage_data["claude"] = _provider_error(str(e))
+                    usage_data["timestamp"] = datetime.utcnow().isoformat() + "Z"
 
-    print(f"  Org:  {ORG_ID}")
+    print(f"  Org:  {ORG_ID or '(CLI OAuth / pending)'}")
     print(f"  Poll: {POLL_INTERVAL}s")
     print(f"  API:  http://localhost:{PORT}/api/usage")
     print()

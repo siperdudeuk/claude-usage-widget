@@ -38,6 +38,8 @@ fi
 
 # Bundle the local backend so the app can self-start even when opened directly.
 cp claude-usage.py "$RESOURCES/claude-usage.py"
+cp ../common/codex_auth.py "$RESOURCES/codex_auth.py"
+cp ../common/claude_auth.py "$RESOURCES/claude_auth.py"
 
 # Create Info.plist
 cat > "$CONTENTS/Info.plist" << 'PLIST'
@@ -46,9 +48,9 @@ cat > "$CONTENTS/Info.plist" << 'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Claude Usage</string>
+    <string>AI Usage Widget</string>
     <key>CFBundleDisplayName</key>
-    <string>Claude Usage</string>
+    <string>AI Usage Widget</string>
     <key>CFBundleIdentifier</key>
     <string>com.siperdudeuk.claude-usage-widget</string>
     <key>CFBundleVersion</key>

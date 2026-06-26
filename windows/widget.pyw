@@ -1,5 +1,5 @@
 """
-Claude Usage Widget — Windows UI
+AI Usage Widget — Windows UI
 Floating always-on-top widget using pywebview.
 """
 
@@ -122,17 +122,42 @@ WIDGET_HTML = """
   .footer .users { display: flex; align-items: center; gap: 4px; }
   .footer .users .dot { width: 5px; height: 5px; border-radius: 50%;
     background: var(--green); display: inline-block; }
+  .provider-tabs {
+    display: flex; gap: 4px; padding: 0 14px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .provider-tab {
+    flex: 1; padding: 5px 0; border: 1px solid var(--border);
+    border-radius: 6px; background: transparent; color: var(--muted);
+    font-size: 10px; font-weight: 600; cursor: pointer;
+  }
+  .provider-tab:hover { color: var(--text); background: rgba(88,166,255,0.08); }
+  .provider-tab.active { color: var(--text); border-color: rgba(188,140,255,0.5);
+    background: rgba(188,140,255,0.15); }
+  .provider-header {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; margin: 4px 0 8px;
+  }
+  .provider-header.claude { color: var(--purple); }
+  .provider-header.codex { color: var(--green); }
+  .provider-section + .provider-section { margin-top: 12px; padding-top: 4px;
+    border-top: 1px solid var(--border); }
 </style>
 </head>
 <body>
 <div class="titlebar" id="titlebar">
-  <h1>⚡ Claude <span class="accent">Usage</span></h1>
+  <h1>⚡ AI <span class="accent">Usage</span></h1>
   <div class="controls">
     <button class="ctrl-btn" title="Share with friends" onclick="shareWidget()">📤</button>
     <button class="ctrl-btn coffee" title="Buy me a coffee" onclick="openCoffee()">☕</button>
     <button class="ctrl-btn" title="Minimize" onclick="pywebview.api.minimize()">—</button>
     <button class="ctrl-btn" title="Close" onclick="pywebview.api.quit()">✕</button>
   </div>
+</div>
+<div class="provider-tabs">
+  <button class="provider-tab active" data-view="all" onclick="setProviderView('all')">All</button>
+  <button class="provider-tab" data-view="claude" onclick="setProviderView('claude')">Claude</button>
+  <button class="provider-tab" data-view="codex" onclick="setProviderView('codex')">Codex</button>
 </div>
 <div class="meta" id="meta">Loading...</div>
 <div id="updateBanner" style="display:none"></div>
@@ -149,6 +174,167 @@ WIDGET_HTML = """
 
 <script>
 const API_PORT = '""" + PORT + """';
+let providerView = localStorage.getItem('cw_provider_view') || 'all';
+let lastStatus = null;
+
+function setProviderView(view) {
+  providerView = view;
+  localStorage.setItem('cw_provider_view', view);
+  document.querySelectorAll('.provider-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === view);
+  });
+  refresh();
+}
+
+function initProviderTabs() {
+  document.querySelectorAll('.provider-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === providerView);
+  });
+}
+
+function shouldShowProvider(name) {
+  return providerView === 'all' || providerView === name;
+}
+
+function prettify(k) {
+  return k.replace(/_/g,' ').replace(/\\b\\w/g, c => c.toUpperCase());
+}
+
+const CLAUDE_LABELS = {
+  five_hour: ['5-Hour Limit', null],
+  seven_day: ['7-Day Limit', 'bar-blue'],
+  seven_day_opus: ['Opus (7-Day)', 'bar-purple'],
+  seven_day_sonnet: ['Sonnet (7-Day)', 'bar-green'],
+  seven_day_oauth_apps: ['OAuth Apps (7-Day)', 'bar-blue'],
+  seven_day_cowork: ['Claude Code (7-Day)', 'bar-purple'],
+  seven_day_omelette: ['Claude Design (7-Day)', 'bar-blue'],
+  iguana_necktie: ['Iguana (7-Day)', null],
+  omelette_promotional: ['Design Promo (7-Day)', null],
+};
+const CLAUDE_ORDER = ['five_hour','seven_day','seven_day_opus','seven_day_sonnet',
+                      'seven_day_cowork','seven_day_omelette','seven_day_oauth_apps',
+                      'iguana_necktie','omelette_promotional'];
+const CODEX_LABELS = {
+  five_hour: ['5-Hour Limit', 'bar-green'],
+  weekly: ['Weekly Limit', 'bar-blue'],
+};
+const CODEX_ORDER = ['five_hour', 'weekly'];
+const META_KEYS = new Set(['error', 'timestamp', 'extra_usage', 'credits', 'plan_type', 'limit_reached', 'auth_source']);
+
+function renderProviderMeters(data, labels, order) {
+  let html = '';
+  const seen = new Set();
+  for (const key of order) {
+    if (!(key in data)) continue;
+    seen.add(key);
+    const v = data[key];
+    if (!v || typeof v !== 'object' || v.utilization == null) continue;
+    const [label, cls] = labels[key] || [prettify(key), null];
+    html += renderMeter(label, v.utilization, v.resets_at, cls);
+  }
+  for (const key of Object.keys(data)) {
+    if (seen.has(key) || META_KEYS.has(key)) continue;
+    const v = data[key];
+    if (!v || typeof v !== 'object' || v.utilization == null) continue;
+    const [label, cls] = labels[key] || [prettify(key), null];
+    html += renderMeter(label, v.utilization, v.resets_at, cls);
+  }
+  return html;
+}
+
+function renderClaudeExtras(d) {
+  if (!d.extra_usage) return '';
+  let html = '<div class="divider"></div>';
+  html += '<div class="extra-row"><span class="extra-label">Extra Credits</span><span>' +
+    (d.extra_usage.is_enabled ? '✓ Enabled' : '✗ Disabled') + '</span></div>';
+  if (d.extra_usage.monthly_limit != null) {
+    html += '<div class="extra-row"><span class="extra-label">Monthly Limit</span><span>$' +
+      (d.extra_usage.monthly_limit/100).toFixed(0) + '</span></div>';
+  }
+  if (d.extra_usage.used_credits != null) {
+    html += '<div class="extra-row"><span class="extra-label">Used This Month</span><span>$' +
+      (d.extra_usage.used_credits/100).toFixed(2) + '</span></div>';
+  }
+  return html;
+}
+
+function renderCodexExtras(d) {
+  if (!d.credits && !d.plan_type && !d.limit_reached) return '';
+  let html = '<div class="divider"></div>';
+  if (d.plan_type) {
+    html += '<div class="extra-row"><span class="extra-label">Plan</span><span>' +
+      d.plan_type + '</span></div>';
+  }
+  if (d.credits) {
+    html += '<div class="extra-row"><span class="extra-label">Credits</span><span>' +
+      (d.credits.has_credits ? '✓ Available' : '✗ None') + '</span></div>';
+    if (d.credits.balance != null) {
+      html += '<div class="extra-row"><span class="extra-label">Balance</span><span>$' +
+        d.credits.balance + '</span></div>';
+    }
+  }
+  if (d.limit_reached) {
+    html += '<div class="extra-row"><span class="extra-label">Status</span><span style="color:var(--red)">Limit reached</span></div>';
+  }
+  return html;
+}
+
+function renderCodexSetup(status, error) {
+  const hasAuth = status && status.has_codex_auth;
+  const source = status && status.codex_auth_source;
+  const ephemeral = status && status.codex_ephemeral;
+  let steps = '';
+  if (ephemeral) {
+    steps += '<div class="setup-step issue"><span class="num">!</span><span>Codex is using <b>ephemeral</b> credentials — set <b>cli_auth_credentials_store = "file"</b> in ~/.codex/config.toml and run <b>codex login</b></span></div>';
+  } else if (!hasAuth) {
+    steps += '<div class="setup-step issue"><span class="num">1</span><span>Run <b>codex login</b> in Terminal (stores credentials in the OS keyring or <b>~/.codex/auth.json</b>)</span></div>';
+  } else {
+    const where = source === 'keyring' ? 'OS keyring' : (source === 'file' ? 'auth.json' : 'Codex CLI');
+    steps += '<div class="setup-step done"><span class="num">✓</span><span>Codex credentials found (' + where + ') — open CLI sessions keep these fresh</span></div>';
+  }
+  if (error && error !== 'Starting up...') {
+    steps += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);color:var(--red);font-size:10px;">' + error + '</div>';
+  }
+  return '<div class="setup-box"><h3>Codex Setup</h3>' + steps + '</div>';
+}
+
+function renderProviderBlock(name, data, status) {
+  if (!shouldShowProvider(name)) return '';
+  const key = name.toLowerCase();
+  let html = '<div class="provider-section">';
+  if (providerView === 'all') {
+    html += '<div class="provider-header ' + key + '">' + name + '</div>';
+  }
+  if (data.error) {
+    html += name === 'Claude'
+      ? renderSetup(status, data.error)
+      : renderCodexSetup(status, data.error);
+  } else {
+    if (name === 'Claude') {
+      html += renderProviderMeters(data, CLAUDE_LABELS, CLAUDE_ORDER);
+      html += renderClaudeExtras(data);
+    } else {
+      html += renderProviderMeters(data, CODEX_LABELS, CODEX_ORDER);
+      html += renderCodexExtras(data);
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
+function formatMetaLine(d) {
+  const ts = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : '—';
+  const parts = [];
+  if (shouldShowProvider('claude') && d.claude && !d.claude.error) {
+    const via = d.claude.auth_source === 'cli' ? 'CLI' : 'Chrome';
+    parts.push('Claude (' + via + ')');
+  }
+  if (shouldShowProvider('codex') && d.codex && !d.codex.error) {
+    parts.push('Codex' + (d.codex.plan_type ? ' (' + d.codex.plan_type + ')' : ''));
+  }
+  if (!parts.length) return 'Updated ' + ts;
+  return 'Updated ' + ts + ' • ' + parts.join(' + ');
+}
 
 function openCoffee() {
   pywebview.api.open_url('https://buymeacoffee.com/nathanbb');
@@ -192,31 +378,38 @@ function renderMeter(label, pct, resetAt, barCls) {
 }
 
 function renderSetup(status, error) {
+  const hasCliAuth = status && status.has_claude_cli_auth;
+  const cliSource = status && status.claude_auth_source;
   const hasCrypto = status && status.has_cryptography;
   const hasCookies = status && status.has_chrome_cookies;
   const hasOrg = status && status.org_id;
   const method = status && status.method;
   let steps = '';
 
-  if (!hasCrypto) {
-    steps += '<div class="setup-step issue"><span class="num">1</span><span>Run: <b>pip install cryptography</b></span></div>';
+  if (!hasCliAuth) {
+    steps += '<div class="setup-step issue"><span class="num">1</span><span>Run <b>claude login</b> in Terminal (recommended — no Chrome needed)</span></div>';
   } else {
-    steps += '<div class="setup-step done"><span class="num">✓</span><span>cryptography package installed</span></div>';
+    const where = cliSource === 'keychain' ? 'OS keychain' : (cliSource === 'file' ? '.credentials.json' : 'Claude CLI');
+    steps += '<div class="setup-step done"><span class="num">✓</span><span>Claude CLI credentials found (' + where + ') — open CLI sessions keep these fresh</span></div>';
   }
 
-  if (!hasCookies) {
-    steps += '<div class="setup-step issue"><span class="num">2</span><span>Log into <b>claude.ai</b> in Chrome</span></div>';
-  } else {
-    steps += '<div class="setup-step done"><span class="num">✓</span><span>Chrome cookies found</span></div>';
+  if (!hasCliAuth) {
+    if (!hasCrypto) {
+      steps += '<div class="setup-step issue"><span class="num">2</span><span>Or install <b>cryptography</b> and log into <b>claude.ai</b> in Chrome</span></div>';
+    } else if (!hasCookies) {
+      steps += '<div class="setup-step issue"><span class="num">2</span><span>Or log into <b>claude.ai</b> in Chrome</span></div>';
+    } else {
+      steps += '<div class="setup-step done"><span class="num">✓</span><span>Chrome cookies found (fallback)</span></div>';
+    }
   }
 
-  if (!hasOrg) {
+  if (!hasCliAuth && !hasOrg) {
     steps += '<div class="setup-step issue"><span class="num">3</span><span>Waiting to detect your organisation...</span></div>';
-  } else {
+  } else if (!hasCliAuth && hasOrg) {
     steps += '<div class="setup-step done"><span class="num">✓</span><span>Organisation detected</span></div>';
   }
 
-  if (method) {
+  if (method && !hasCliAuth) {
     steps += '<div class="setup-step done"><span class="num">✓</span><span>Connected via ' + method + '</span></div>';
   }
 
@@ -224,78 +417,44 @@ function renderSetup(status, error) {
     steps += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);color:var(--red);font-size:10px;">' + error + '</div>';
   }
 
-  return '<div class="setup-box"><h3>Setup</h3>' + steps + '</div>';
+  return '<div class="setup-box"><h3>Claude Setup</h3>' + steps + '</div>';
 }
 
 async function refresh() {
   try {
     const r = await fetch('http://localhost:' + API_PORT + '/api/usage');
     const d = await r.json();
+    const claude = d.claude || { error: 'No Claude data' };
+    const codex = d.codex || { error: 'No Codex data' };
 
-    if (d.error) {
-      let status = null;
-      try {
-        const sr = await fetch('http://localhost:' + API_PORT + '/api/status');
-        status = await sr.json();
-      } catch(e2) {}
-      document.getElementById('content').innerHTML = renderSetup(status, d.error);
-      document.getElementById('meta').textContent = d.error === 'Starting up...' ? 'Starting...' : 'Setup needed';
+    let status = lastStatus;
+    try {
+      const sr = await fetch('http://localhost:' + API_PORT + '/api/status');
+      status = await sr.json();
+      lastStatus = status;
+    } catch(e2) {}
+
+    const claudeStarting = claude.error === 'Starting up...';
+    const codexStarting = codex.error === 'Starting up...';
+    const showClaude = shouldShowProvider('claude');
+    const showCodex = shouldShowProvider('codex');
+    const claudeReady = !claude.error;
+    const codexReady = !codex.error;
+
+    if ((showClaude && claudeStarting || showCodex && codexStarting) && !claudeReady && !codexReady) {
+      document.getElementById('content').innerHTML =
+        renderProviderBlock('Claude', claude, status) +
+        renderProviderBlock('Codex', codex, status);
+      document.getElementById('meta').textContent = 'Starting...';
       return;
     }
 
-    const ts = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : '—';
-    document.getElementById('meta').textContent = 'Updated ' + ts + ' • Claude Max';
-
-    let html = '';
-
-    const LABELS = {
-      five_hour: ['5-Hour Limit', null],
-      seven_day: ['7-Day Limit', 'bar-blue'],
-      seven_day_opus: ['Opus (7-Day)', 'bar-purple'],
-      seven_day_sonnet: ['Sonnet (7-Day)', 'bar-green'],
-      seven_day_oauth_apps: ['OAuth Apps (7-Day)', 'bar-blue'],
-      seven_day_cowork: ['Claude Code (7-Day)', 'bar-purple'],
-      seven_day_omelette: ['Claude Design (7-Day)', 'bar-blue'],
-      iguana_necktie: ['Iguana (7-Day)', null],
-      omelette_promotional: ['Design Promo (7-Day)', null],
-    };
-    const ORDER = ['five_hour','seven_day','seven_day_opus','seven_day_sonnet',
-                   'seven_day_cowork','seven_day_omelette','seven_day_oauth_apps',
-                   'iguana_necktie','omelette_promotional'];
-    const seen = new Set();
-    function prettify(k) {
-      return k.replace(/_/g,' ').replace(/\\b\\w/g, c => c.toUpperCase());
+    document.getElementById('meta').textContent = formatMetaLine(d);
+    let html = renderProviderBlock('Claude', claude, status) +
+               renderProviderBlock('Codex', codex, status);
+    if (!html.trim()) {
+      html = '<div class="error-box">No usage data for the selected view.</div>';
     }
-    for (const key of ORDER) {
-      if (!(key in d)) continue;
-      seen.add(key);
-      const v = d[key];
-      if (!v || typeof v !== 'object' || v.utilization == null) continue;
-      const [label, cls] = LABELS[key] || [prettify(key), null];
-      html += renderMeter(label, v.utilization, v.resets_at, cls);
-    }
-    for (const key of Object.keys(d)) {
-      if (seen.has(key)) continue;
-      const v = d[key];
-      if (!v || typeof v !== 'object' || v.utilization == null) continue;
-      const [label, cls] = LABELS[key] || [prettify(key), null];
-      html += renderMeter(label, v.utilization, v.resets_at, cls);
-    }
-
-    if (d.extra_usage) {
-      html += '<div class="divider"></div>';
-      html += '<div class="extra-row"><span class="extra-label">Extra Credits</span><span>' +
-        (d.extra_usage.is_enabled ? '✓ Enabled' : '✗ Disabled') + '</span></div>';
-      if (d.extra_usage.monthly_limit != null) {
-        html += '<div class="extra-row"><span class="extra-label">Monthly Limit</span><span>$' +
-          (d.extra_usage.monthly_limit/100).toFixed(0) + '</span></div>';
-      }
-      if (d.extra_usage.used_credits != null) {
-        html += '<div class="extra-row"><span class="extra-label">Used This Month</span><span>$' +
-          (d.extra_usage.used_credits/100).toFixed(2) + '</span></div>';
-      }
-    }
-
     document.getElementById('content').innerHTML = html;
   } catch(e) {
     document.getElementById('content').innerHTML =
@@ -377,6 +536,7 @@ async function fetchUserCount() {
 }
 
 refresh();
+initProviderTabs();
 setInterval(refresh, 10000);
 checkVersion();
 setInterval(checkVersion, 300000);
@@ -406,8 +566,8 @@ class Api:
     def share(self):
         import webbrowser
         import urllib.parse
-        subject = urllib.parse.quote("Check out Claude Usage Widget")
-        body = urllib.parse.quote("Monitor your Claude AI usage limits in a floating desktop widget!\nhttps://github.com/siperdudeuk/claude-usage-widget")
+        subject = urllib.parse.quote("Check out AI Usage Widget")
+        body = urllib.parse.quote("Monitor your Claude and Codex AI usage limits in a floating desktop widget!\nhttps://github.com/siperdudeuk/claude-usage-widget")
         webbrowser.open(f"mailto:?subject={subject}&body={body}")
 
 
@@ -433,10 +593,10 @@ def main():
 
     # Create window
     window = webview.create_window(
-        "Claude Usage",
+        "AI Usage Widget",
         html=WIDGET_HTML,
         width=320,
-        height=440,
+        height=480,
         resizable=True,
         frameless=True,
         on_top=True,

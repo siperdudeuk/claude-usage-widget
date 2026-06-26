@@ -28,7 +28,7 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key><string>ClaudeUsageWidget</string>
-    <key>CFBundleDisplayName</key><string>Claude Usage Widget</string>
+    <key>CFBundleDisplayName</key><string>AI Usage Widget</string>
     <key>CFBundleIdentifier</key><string>com.github.claude-usage-widget</string>
     <key>CFBundleVersion</key><string>1.0.0</string>
     <key>CFBundleExecutable</key><string>launch</string>
@@ -54,7 +54,7 @@ chmod +x "$APP_DIR/Contents/MacOS/launch"
 
 echo ""
 echo "Installed! You can now:"
-echo "  1. Open 'Claude Usage Widget' from ~/Applications"
+echo "  1. Open 'AI Usage Widget' from ~/Applications"
 echo "  2. Or run: open $APP_DIR"
 echo ""
-echo "Make sure you have a claude.ai tab open in Chrome first."
+echo "Make sure you have a claude.ai tab open in Chrome, and Codex logged in (~/.codex/auth.json)."
