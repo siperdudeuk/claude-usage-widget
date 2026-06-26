@@ -14,7 +14,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let backendPort = ProcessInfo.processInfo.environment["CLAUDE_WIDGET_PORT"] ?? "9113"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let frame = NSRect(x: 0, y: 0, width: 320, height: 480)
+        let frame = NSRect(x: 0, y: 0, width: 340, height: 520)
         window = NSWindow(
             contentRect: frame,
             styleMask: [.borderless, .resizable],
@@ -27,7 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
         window.isMovableByWindowBackground = true
-        window.minSize = NSSize(width: 280, height: 320)
+        window.minSize = NSSize(width: 300, height: 380)
 
         window.contentView?.wantsLayer = true
         window.contentView?.layer?.cornerRadius = 14
@@ -266,15 +266,17 @@ func usageHTML(port: String) -> String {
         --yellow: #d29922; --red: #f85149; --blue: #58a6ff; --purple: #bc8cff;
       }
       * { box-sizing: border-box; margin: 0; padding: 0; }
+      html { height: 100%; }
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
         background: var(--bg); color: var(--text);
         -webkit-user-select: none; user-select: none;
         border-radius: 14px; overflow: hidden;
+        height: 100vh; display: flex; flex-direction: column;
       }
       .titlebar {
         display: flex; align-items: center; justify-content: space-between;
-        padding: 10px 14px 6px; cursor: grab;
+        padding: 8px 12px 5px; cursor: grab; flex: 0 0 auto;
       }
       .titlebar h1 { font-size: 13px; font-weight: 600; }
       .accent { color: var(--purple); }
@@ -288,40 +290,53 @@ func usageHTML(port: String) -> String {
       .ctrl-btn.pinned { background: rgba(188,140,255,0.2); color: var(--purple); }
       .ctrl-btn.coffee { background: rgba(255,221,0,0.15); color: #ffdd00; font-size: 13px; }
       .ctrl-btn.coffee:hover { background: rgba(255,221,0,0.3); }
-      .meta { font-size: 9px; color: var(--muted); padding: 0 14px 8px;
-        border-bottom: 1px solid var(--border); }
-      .content { padding: 10px 14px 14px; }
-      .meter { margin-bottom: 10px; }
-      .meter-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+      .meta {
+        font-size: 9px; color: var(--muted); padding: 0 12px 6px;
+        border-bottom: 1px solid var(--border); flex: 0 0 auto;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .content {
+        padding: 8px 10px 10px; flex: 1 1 auto; min-height: 0;
+        overflow-y: auto; overscroll-behavior: contain;
+      }
+      .content::-webkit-scrollbar { width: 6px; }
+      .content::-webkit-scrollbar-track { background: transparent; }
+      .content::-webkit-scrollbar-thumb { background: rgba(139,148,158,0.28); border-radius: 999px; }
+      .meter {
+        margin-bottom: 7px; padding: 7px 8px;
+        border: 1px solid rgba(48,54,61,0.38);
+        border-radius: 8px; background: rgba(22,27,34,0.46);
+      }
+      .meter-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px; }
       .meter-label { font-size: 11px; font-weight: 600; }
-      .meter-value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+      .meter-value { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
       .meter-sub { font-size: 10px; color: var(--muted); }
-      .bar-track { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 4px; }
+      .bar-track { height: 6px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 4px; }
       .bar-fill { height: 100%; border-radius: 4px; transition: width 0.8s ease; }
       .bar-purple { background: linear-gradient(90deg, var(--purple), #d4a0ff); }
       .bar-blue { background: linear-gradient(90deg, var(--blue), #79c0ff); }
       .bar-green { background: var(--green); }
       .bar-yellow { background: var(--yellow); }
       .bar-red { background: var(--red); }
-      .reset-time { font-size: 9px; color: var(--muted); margin-top: 2px; }
-      .divider { border-top: 1px solid var(--border); margin: 8px 0; }
-      .extra-row { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 0; }
+      .reset-time { font-size: 9px; color: var(--muted); margin-top: 3px; min-height: 11px; }
+      .divider { border-top: 1px solid var(--border); margin: 7px 0; }
+      .extra-row { display: flex; justify-content: space-between; gap: 10px; font-size: 10px; padding: 2px 1px; }
       .extra-label { color: var(--muted); }
       .error-box { background: rgba(248,81,73,0.1); border: 1px solid rgba(248,81,73,0.4);
-        border-radius: 8px; padding: 10px; color: var(--red); font-size: 11px; }
+        border-radius: 8px; padding: 9px; color: var(--red); font-size: 11px; }
       .setup-box { background: rgba(88,166,255,0.08); border: 1px solid rgba(88,166,255,0.3);
-        border-radius: 8px; padding: 12px; font-size: 11px; }
-      .setup-box h3 { font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--blue); }
-      .setup-step { display: flex; gap: 8px; padding: 4px 0; color: var(--muted); }
+        border-radius: 8px; padding: 10px; font-size: 11px; }
+      .setup-box h3 { font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--blue); }
+      .setup-step { display: flex; gap: 7px; padding: 3px 0; color: var(--muted); }
       .setup-step .num { color: var(--purple); font-weight: 700; min-width: 16px; }
       .setup-step.done { color: var(--green); }
       .setup-step.issue { color: var(--yellow); }
       .update-banner {
         background: linear-gradient(90deg, rgba(188,140,255,0.2), rgba(88,166,255,0.2));
         border: 1px solid rgba(188,140,255,0.5);
-        border-radius: 8px; padding: 8px 10px; margin: 0 14px 10px;
+        border-radius: 8px; padding: 7px 9px; margin: 0 10px 8px;
         display: flex; align-items: center; justify-content: space-between;
-        gap: 8px; font-size: 10px;
+        gap: 8px; font-size: 10px; flex: 0 0 auto;
       }
       .update-banner .msg { color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .update-banner .msg b { color: var(--purple); }
@@ -335,7 +350,7 @@ func usageHTML(port: String) -> String {
       .coffee-banner {
         background: linear-gradient(90deg, rgba(255,221,0,0.08), rgba(255,180,0,0.08));
         border: 1px solid rgba(255,221,0,0.25);
-        border-radius: 8px; padding: 8px 10px; margin: 0 14px 10px;
+        border-radius: 8px; padding: 7px 9px; margin: 0 10px 8px;
         display: flex; align-items: center; gap: 8px; font-size: 10px;
       }
       .coffee-banner .msg { color: var(--muted); flex: 1; }
@@ -358,18 +373,19 @@ func usageHTML(port: String) -> String {
         opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 99;
       }
       .share-toast.show { opacity: 1; }
-      .footer { padding: 6px 14px 10px; border-top: 1px solid var(--border);
+      .footer { padding: 5px 10px 8px; border-top: 1px solid var(--border);
         display: flex; justify-content: space-between; align-items: center;
-        font-size: 9px; color: var(--muted); }
+        gap: 8px; font-size: 9px; color: var(--muted); flex: 0 0 auto; }
+      .footer > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .footer .users { display: flex; align-items: center; gap: 4px; }
       .footer .users .dot { width: 5px; height: 5px; border-radius: 50%;
         background: var(--green); display: inline-block; }
       .provider-tabs {
-        display: flex; gap: 4px; padding: 0 14px 8px;
-        border-bottom: 1px solid var(--border);
+        display: flex; gap: 4px; padding: 0 12px 7px;
+        border-bottom: 1px solid var(--border); flex: 0 0 auto;
       }
       .provider-tab {
-        flex: 1; padding: 5px 0; border: 1px solid var(--border);
+        flex: 1; padding: 4px 0; border: 1px solid var(--border);
         border-radius: 6px; background: transparent; color: var(--muted);
         font-size: 10px; font-weight: 600; cursor: pointer;
       }
@@ -377,13 +393,30 @@ func usageHTML(port: String) -> String {
       .provider-tab.active { color: var(--text); border-color: rgba(188,140,255,0.5);
         background: rgba(188,140,255,0.15); }
       .provider-header {
+        display: flex; align-items: center; justify-content: space-between;
         font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
-        text-transform: uppercase; margin: 4px 0 8px;
+        text-transform: uppercase; margin: 2px 0 6px;
       }
       .provider-header.claude { color: var(--purple); }
       .provider-header.codex { color: var(--green); }
-      .provider-section + .provider-section { margin-top: 12px; padding-top: 4px;
+      .provider-section + .provider-section { margin-top: 9px; padding-top: 5px;
         border-top: 1px solid var(--border); }
+      .compact-note { color: var(--muted); font-size: 9px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+      .provider-note { color: var(--muted); font-size: 9px; margin: -2px 1px 5px; }
+      body.view-all .content { padding-top: 6px; }
+      body.view-all .provider-section + .provider-section { margin-top: 7px; padding-top: 4px; }
+      body.view-all .meter { padding: 6px 8px; margin-bottom: 6px; }
+      body.view-all .meter-value { font-size: 16px; }
+      body.view-all .reset-time { font-size: 8px; min-height: 10px; }
+      @media (max-height: 450px) {
+        .titlebar { padding-top: 6px; }
+        .ctrl-btn { width: 22px; height: 22px; }
+        .content { padding-top: 6px; }
+        .meter { padding: 6px 7px; margin-bottom: 6px; }
+        .meter-value { font-size: 15px; }
+        .reset-time { display: none; }
+        .footer { display: none; }
+      }
     </style>
     </head>
     <body>
@@ -438,6 +471,7 @@ func usageHTML(port: String) -> String {
     function setProviderView(view) {
       providerView = view;
       localStorage.setItem('cw_provider_view', view);
+      document.body.classList.toggle('view-all', providerView === 'all');
       document.querySelectorAll('.provider-tab').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.view === view);
       });
@@ -445,13 +479,14 @@ func usageHTML(port: String) -> String {
     }
 
     function initProviderTabs() {
+      document.body.classList.toggle('view-all', providerView === 'all');
       document.querySelectorAll('.provider-tab').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.view === providerView);
       });
     }
 
     function shouldShowProvider(name) {
-      return providerView === 'all' || providerView === name;
+      return providerView === 'all' || providerView === String(name).toLowerCase();
     }
 
     function prettify(k) {
@@ -479,25 +514,30 @@ func usageHTML(port: String) -> String {
     const CODEX_ORDER = ['five_hour', 'weekly'];
     const META_KEYS = new Set(['error', 'timestamp', 'extra_usage', 'credits', 'plan_type', 'limit_reached', 'auth_source']);
 
-    function renderProviderMeters(data, labels, order) {
+    function renderProviderMeters(data, labels, order, maxMeters = Infinity) {
       let html = '';
       const seen = new Set();
+      let total = 0;
+      let shown = 0;
+      function addMeter(key) {
+        const v = data[key];
+        if (!v || typeof v !== 'object' || v.utilization == null) return;
+        total++;
+        if (shown >= maxMeters) return;
+        shown++;
+        const [label, cls] = labels[key] || [prettify(key), null];
+        html += renderMeter(label, v.utilization, v.resets_at, cls);
+      }
       for (const key of order) {
         if (!(key in data)) continue;
         seen.add(key);
-        const v = data[key];
-        if (!v || typeof v !== 'object' || v.utilization == null) continue;
-        const [label, cls] = labels[key] || [prettify(key), null];
-        html += renderMeter(label, v.utilization, v.resets_at, cls);
+        addMeter(key);
       }
       for (const key of Object.keys(data)) {
         if (seen.has(key) || META_KEYS.has(key)) continue;
-        const v = data[key];
-        if (!v || typeof v !== 'object' || v.utilization == null) continue;
-        const [label, cls] = labels[key] || [prettify(key), null];
-        html += renderMeter(label, v.utilization, v.resets_at, cls);
+        addMeter(key);
       }
-      return html;
+      return { html, total, shown };
     }
 
     function renderClaudeExtras(d) {
@@ -568,12 +608,20 @@ func usageHTML(port: String) -> String {
           ? renderSetup(status, data.error)
           : renderCodexSetup(status, data.error);
       } else {
+        const compactAll = providerView === 'all';
+        const maxMeters = compactAll ? 2 : Infinity;
+        const labels = name === 'Claude' ? CLAUDE_LABELS : CODEX_LABELS;
+        const order = name === 'Claude' ? CLAUDE_ORDER : CODEX_ORDER;
+        const meters = renderProviderMeters(data, labels, order, maxMeters);
         if (name === 'Claude') {
-          html += renderProviderMeters(data, CLAUDE_LABELS, CLAUDE_ORDER);
-          html += renderClaudeExtras(data);
+          html += meters.html;
+          if (!compactAll) html += renderClaudeExtras(data);
         } else {
-          html += renderProviderMeters(data, CODEX_LABELS, CODEX_ORDER);
-          html += renderCodexExtras(data);
+          html += meters.html;
+          if (!compactAll) html += renderCodexExtras(data);
+        }
+        if (compactAll && meters.total > meters.shown) {
+          html += '<div class="provider-note">Showing key limits — open the ' + name + ' tab for all ' + meters.total + '.</div>';
         }
       }
       html += '</div>';
