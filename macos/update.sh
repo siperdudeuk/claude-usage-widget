@@ -7,18 +7,24 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_DIR"
 
 PYTHON_BIN="/usr/bin/python3"
-PIP_BIN="/usr/bin/pip3"
 
 echo "Pulling latest changes..."
 git pull --ff-only
 
 cd "$SCRIPT_DIR"
 
-# Reinstall deps if requirements changed
-if ! "$PYTHON_BIN" -c "import cryptography" 2>/dev/null; then
-    echo "Installing new dependencies..."
-    "$PIP_BIN" install -q -r requirements.txt
+# Ensure Python deps are present and arch-correct. curl_cffi (and cryptography)
+# ship compiled wheels per-arch; the widget now builds a universal app that runs
+# native arm64 on Apple Silicon, so force arm64 wheels even if this updater is
+# itself invoked under Rosetta (e.g. spawned by an older x86_64 build).
+PIP_ARCH=""
+if sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$'; then
+    PIP_ARCH="arch -arm64"
 fi
+echo "Ensuring Python dependencies..."
+$PIP_ARCH "$PYTHON_BIN" -m pip install -q --user -r requirements.txt \
+    || "$PYTHON_BIN" -m pip install -q --user -r requirements.txt \
+    || echo "WARN: dependency install failed; usage fetch may be degraded" >&2
 
 echo "Rebuilding widget..."
 bash build.sh
