@@ -49,14 +49,37 @@ def _load_from_file():
 
 def _load_from_keychain():
     if sys.platform == "darwin":
-        result = subprocess.run(
-            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return json.loads(result.stdout.strip()), "keychain"
+        import getpass
+
+        try:
+            login_user = getpass.getuser()
+        except Exception:
+            login_user = None
+
+        # Several generic-password items can share this service name — e.g. an
+        # "claude-code-user" account that only holds mcpOAuth tokens sitting
+        # alongside the real login item (stored under the macOS username). A
+        # bare lookup returns an arbitrary match, so probe candidate accounts
+        # and prefer the record that actually carries the claudeAiOauth token.
+        fallback = None
+        for account in (login_user, "claude-code-user", None):
+            cmd = ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE]
+            if account:
+                cmd += ["-a", account]
+            cmd += ["-w"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if result.returncode != 0 or not result.stdout.strip():
+                continue
+            try:
+                record = json.loads(result.stdout.strip())
+            except (ValueError, TypeError):
+                continue
+            if isinstance(record, dict) and record.get("claudeAiOauth"):
+                return record, "keychain"
+            if fallback is None:
+                fallback = record
+        if fallback is not None:
+            return fallback, "keychain"
 
     try:
         import keyring
