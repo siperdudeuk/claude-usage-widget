@@ -12,6 +12,44 @@ KEYCHAIN_SERVICE = "Claude Code-credentials"
 OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 
 
+class ClaudeRateLimitError(Exception):
+    """The usage endpoint answered 429. `retry_after` is seconds (or None)."""
+
+    def __init__(self, message, retry_after=None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _parse_retry_after(headers):
+    """Return Retry-After as seconds, accepting delta-seconds or an HTTP-date."""
+    if not headers:
+        return None
+    value = headers.get("Retry-After") or headers.get("retry-after")
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        return max(0, int(float(value)))
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+
+        when = parsedate_to_datetime(value)
+        return max(0, int(when.timestamp() - time.time()))
+    except Exception:
+        return None
+
+
+def _raise_for_http_error(e, suffix=""):
+    body = e.read().decode(errors="replace")[:200]
+    if e.code == 429:
+        raise ClaudeRateLimitError(
+            f"Claude OAuth HTTP 429: {body}", _parse_retry_after(e.headers)
+        ) from e
+    raise Exception(f"Claude OAuth HTTP {e.code}: {body}{suffix}") from e
+
+
 def get_claude_config_dir():
     return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 
@@ -49,14 +87,37 @@ def _load_from_file():
 
 def _load_from_keychain():
     if sys.platform == "darwin":
-        result = subprocess.run(
-            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return json.loads(result.stdout.strip()), "keychain"
+        import getpass
+
+        try:
+            login_user = getpass.getuser()
+        except Exception:
+            login_user = None
+
+        # Several generic-password items can share this service name — e.g. an
+        # "claude-code-user" account that only holds mcpOAuth tokens sitting
+        # alongside the real login item (stored under the macOS username). A
+        # bare lookup returns an arbitrary match, so probe candidate accounts
+        # and prefer the record that actually carries the claudeAiOauth token.
+        fallback = None
+        for account in (login_user, "claude-code-user", None):
+            cmd = ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE]
+            if account:
+                cmd += ["-a", account]
+            cmd += ["-w"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if result.returncode != 0 or not result.stdout.strip():
+                continue
+            try:
+                record = json.loads(result.stdout.strip())
+            except (ValueError, TypeError):
+                continue
+            if isinstance(record, dict) and record.get("claudeAiOauth"):
+                return record, "keychain"
+            if fallback is None:
+                fallback = record
+        if fallback is not None:
+            return fallback, "keychain"
 
     try:
         import keyring
@@ -163,35 +224,29 @@ def fetch_claude_oauth_usage():
             headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/json",
+                "Content-Type": "application/json",
                 "anthropic-beta": "oauth-2025-04-20",
-                "anthropic-version": "2023-06-01",
+                "User-Agent": "ai-usage-widget/1.0",
             },
             method="GET",
         )
 
-    req = _request(creds["access_token"])
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(_request(creds["access_token"]), timeout=15) as resp:
             data = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
-        if e.code in (401, 403):
-            record, _ = load_claude_credentials_record()
-            if record:
-                try:
-                    creds = _parse_credentials_record(record)
-                    with urllib.request.urlopen(_request(creds["access_token"]), timeout=15) as resp:
-                        data = json.loads(resp.read().decode())
-                except urllib.error.HTTPError as e2:
-                    body = e2.read().decode(errors="replace")[:200]
-                    raise Exception(
-                        f"Claude OAuth HTTP {e2.code}: {body} — keep your CLI session open"
-                    ) from e2
-            else:
-                body = e.read().decode(errors="replace")[:200]
-                raise Exception(f"Claude OAuth HTTP {e.code}: {body}") from e
-        else:
-            body = e.read().decode(errors="replace")[:200]
-            raise Exception(f"Claude OAuth HTTP {e.code}: {body}") from e
+        if e.code not in (401, 403):
+            _raise_for_http_error(e)
+        # The CLI may have rotated the token since we read it; re-read once.
+        record, _ = load_claude_credentials_record()
+        if not record:
+            _raise_for_http_error(e)
+        creds = _parse_credentials_record(record)
+        try:
+            with urllib.request.urlopen(_request(creds["access_token"]), timeout=15) as resp:
+                data = json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e2:
+            _raise_for_http_error(e2, " — keep your CLI session open")
 
     data["timestamp"] = datetime.utcnow().isoformat() + "Z"
     data["error"] = None

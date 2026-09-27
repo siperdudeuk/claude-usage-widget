@@ -12,12 +12,33 @@ RESOURCES="$CONTENTS/Resources"
 
 echo "Building $APP_NAME..."
 
-# Compile binary
-swiftc ClaudeWidget.swift \
-    -framework Cocoa \
-    -framework WebKit \
-    -o "$APP_NAME" \
-    -O
+# Compile a universal binary (arm64 + x86_64). This is essential, not cosmetic:
+# the app spawns the Python usage backend, which inherits the app's CPU arch, and
+# that backend's fetch library (curl_cffi) ships arch-specific compiled wheels. An
+# x86_64-only app forces the whole stack under Rosetta and demands x86_64 wheels;
+# a universal binary runs natively on Apple Silicon (and Intel), so a normal wheel
+# for the host arch just works — regardless of the arch this build itself runs as.
+COMMON_FLAGS=(-framework Cocoa -framework WebKit -O)
+
+SLICES=()
+if swiftc ClaudeWidget.swift "${COMMON_FLAGS[@]}" -target arm64-apple-macosx11.0 -o "$APP_NAME-arm64"; then
+    SLICES+=("$APP_NAME-arm64")
+fi
+if swiftc ClaudeWidget.swift "${COMMON_FLAGS[@]}" -target x86_64-apple-macosx11.0 -o "$APP_NAME-x86_64"; then
+    SLICES+=("$APP_NAME-x86_64")
+fi
+
+if [ ${#SLICES[@]} -eq 0 ]; then
+    echo "ERROR: Swift compile failed for all architectures" >&2
+    exit 1
+elif [ ${#SLICES[@]} -eq 1 ]; then
+    mv "${SLICES[0]}" "$APP_NAME"
+    echo "Built single-arch binary: ${SLICES[0]#$APP_NAME-}"
+else
+    lipo -create "${SLICES[@]}" -o "$APP_NAME"
+    rm -f "${SLICES[@]}"
+    echo "Built universal binary (arm64 + x86_64)"
+fi
 
 # Generate icon if needed
 if [ ! -f "$APP_NAME.icns" ]; then
