@@ -512,7 +512,23 @@ func usageHTML(port: String) -> String {
       weekly: ['Weekly Limit', 'bar-blue'],
     };
     const CODEX_ORDER = ['five_hour', 'weekly'];
-    const META_KEYS = new Set(['error', 'timestamp', 'extra_usage', 'credits', 'plan_type', 'limit_reached', 'auth_source']);
+    const META_KEYS = new Set(['error', 'timestamp', 'extra_usage', 'credits', 'plan_type', 'limit_reached', 'auth_source',
+                               'stale', 'rate_limited', 'retry_at', 'last_success']);
+
+    function hhmm(iso) {
+      if (!iso) return null;
+      const d = new Date(iso);
+      if (isNaN(d)) return null;
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function renderRateLimitNote(d) {
+      const at = hhmm(d.retry_at);
+      const from = hhmm(d.last_success || d.timestamp);
+      let msg = 'Rate limited' + (at ? ', retrying at ' + at : ', retrying shortly');
+      if (d.stale && from) msg += ' · showing usage from ' + from;
+      return '<div class="provider-note" style="color:var(--yellow)">' + msg + '</div>';
+    }
 
     function renderProviderMeters(data, labels, order, maxMeters = Infinity) {
       let html = '';
@@ -603,7 +619,9 @@ func usageHTML(port: String) -> String {
       if (providerView === 'all') {
         html += '<div class="provider-header ' + key + '">' + name + '</div>';
       }
-      if (data.error) {
+      if (data.error && data.rate_limited) {
+        html += renderRateLimitNote(data);
+      } else if (data.error) {
         html += name === 'Claude'
           ? renderSetup(status, data.error)
           : renderCodexSetup(status, data.error);
@@ -615,6 +633,7 @@ func usageHTML(port: String) -> String {
         const meters = renderProviderMeters(data, labels, order, maxMeters);
         if (name === 'Claude') {
           html += meters.html;
+          if (data.rate_limited) html += renderRateLimitNote(data);
           if (!compactAll) html += renderClaudeExtras(data);
         } else {
           html += meters.html;
@@ -633,7 +652,7 @@ func usageHTML(port: String) -> String {
       const parts = [];
       if (shouldShowProvider('claude') && d.claude && !d.claude.error) {
         const via = d.claude.auth_source === 'cli' ? 'CLI' : 'Chrome';
-        parts.push('Claude (' + via + ')');
+        parts.push('Claude (' + via + (d.claude.stale ? ', cached' : '') + ')');
       }
       if (shouldShowProvider('codex') && d.codex && !d.codex.error) {
         parts.push('Codex' + (d.codex.plan_type ? ' (' + d.codex.plan_type + ')' : ''));

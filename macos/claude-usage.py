@@ -31,6 +31,13 @@ from datetime import datetime
 
 ORG_ID = os.environ.get("CLAUDE_ORG_ID", "")
 POLL_INTERVAL = int(os.environ.get("CLAUDE_POLL_INTERVAL", "60"))
+# api.anthropic.com/api/oauth/usage is rate limited per account, and every open
+# Claude Code session draws on the same bucket. Poll it far less often than the
+# loop runs, and back off (honouring Retry-After) whenever it answers 429.
+CLAUDE_MIN_INTERVAL = int(os.environ.get("CLAUDE_USAGE_INTERVAL", "180"))
+CLAUDE_BACKOFF_BASE = 120
+CLAUDE_BACKOFF_MAX = 1800
+CLAUDE_CACHE_FILE = os.path.expanduser("~/Library/Caches/claude-usage-widget/claude-last.json")
 PORT = int(os.environ.get("CLAUDE_WIDGET_PORT", "9113"))
 UPDATE_CHECK_INTERVAL = 3600  # once per hour
 GITHUB_REPO = "siperdudeuk/claude-usage-widget"
@@ -42,7 +49,12 @@ COMMON_DIR = os.path.join(REPO_DIR, "common")
 if os.path.isdir(COMMON_DIR) and COMMON_DIR not in sys.path:
     sys.path.insert(0, COMMON_DIR)
 
-from claude_auth import fetch_claude_oauth_usage, get_claude_auth_status, has_claude_credentials
+from claude_auth import (
+    ClaudeRateLimitError,
+    fetch_claude_oauth_usage,
+    get_claude_auth_status,
+    has_claude_credentials,
+)
 from codex_auth import get_codex_auth_status, has_codex_credentials, load_codex_credentials
 
 usage_data = {
@@ -367,6 +379,11 @@ def collect_claude_usage():
     oauth_error = None
     try:
         return fetch_claude_oauth_usage()
+    except ClaudeRateLimitError:
+        # The CLI credentials are fine; the endpoint just wants us to wait.
+        # Falling through to Chrome would only swap a clear 429 for a
+        # confusing "open Chrome" error (and reload a claude.ai tab).
+        raise
     except Exception as e:
         oauth_error = str(e)
 
@@ -547,6 +564,90 @@ def _provider_error(message):
     }
 
 
+def _iso(ts):
+    return datetime.utcfromtimestamp(ts).isoformat() + "Z"
+
+
+class ClaudePoller:
+    """Rate-limit-aware Claude usage fetcher with a last-good-value cache."""
+
+    def __init__(self):
+        self.last_good = self._load_cache()
+        self.last_result = None
+        self.next_attempt = 0.0
+        self.failures = 0
+        self.retry_at = None  # epoch seconds while rate limited
+
+    def _load_cache(self):
+        try:
+            with open(CLAUDE_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) and not data.get("error") else None
+        except Exception:
+            return None
+
+    def _save_cache(self, data):
+        try:
+            os.makedirs(os.path.dirname(CLAUDE_CACHE_FILE), exist_ok=True)
+            tmp = CLAUDE_CACHE_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            os.replace(tmp, CLAUDE_CACHE_FILE)
+        except Exception:
+            pass
+
+    def _rate_limited_view(self):
+        retry_iso = _iso(self.retry_at) if self.retry_at else None
+        if self.last_good:
+            view = dict(self.last_good)
+            view.update({
+                "error": None,
+                "stale": True,
+                "rate_limited": True,
+                "retry_at": retry_iso,
+                "last_success": self.last_good.get("timestamp"),
+            })
+            return view
+        view = _provider_error("Rate limited by Anthropic — no usage cached yet")
+        view.update({"rate_limited": True, "retry_at": retry_iso})
+        return view
+
+    def poll(self):
+        now = time.time()
+        if now < self.next_attempt and self.last_result is not None:
+            if self.retry_at:
+                return self._rate_limited_view()
+            return self.last_result
+        try:
+            data = collect_claude_usage()
+        except ClaudeRateLimitError as e:
+            self.failures += 1
+            backoff = min(CLAUDE_BACKOFF_MAX, CLAUDE_BACKOFF_BASE * (2 ** (self.failures - 1)))
+            wait = max(backoff, e.retry_after or 0)
+            self.next_attempt = now + wait
+            self.retry_at = self.next_attempt
+            print(f"  Claude usage 429 (Retry-After={e.retry_after}); next try in {wait}s")
+            self.last_result = self._rate_limited_view()
+            return self.last_result
+        except Exception as e:
+            # Auth/config problems: surface them, but don't hammer either.
+            self.failures = 0
+            self.retry_at = None
+            self.next_attempt = now + POLL_INTERVAL
+            self.last_result = _provider_error(str(e))
+            return self.last_result
+        self.failures = 0
+        self.retry_at = None
+        self.next_attempt = now + CLAUDE_MIN_INTERVAL
+        self.last_good = data
+        self.last_result = data
+        self._save_cache(data)
+        return data
+
+
+claude_poller = ClaudePoller()
+
+
 def polling_loop():
     global usage_data, _fetch_method, _session_cookie, ORG_ID
     while True:
@@ -555,13 +656,9 @@ def polling_loop():
         codex = {"error": None, "timestamp": now}
 
         try:
-            claude = collect_claude_usage()
+            claude = claude_poller.poll()
         except Exception as e:
             claude = _provider_error(str(e))
-            if _fetch_method == "cookies" and "HTTP Error 401" in str(e):
-                print("  Cookie auth expired, will re-extract next poll...")
-                _session_cookie = None
-                _cookie_last_refreshed = 0
 
         try:
             codex = collect_codex_usage()
